@@ -1,0 +1,5253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Johoe · 아침 조회 도우미</title>
+
+<!-- 본문용 한글 폰트 (프리텐다드) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<!-- 제목용 명조 + 숫자용 고정폭 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<!-- 엑셀 파일 읽기용 -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- 학생 화면 QR 만들기용 -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+<style>
+/* ============================================================
+   디자인 토큰
+   교무수첩(잉크 남색) + 갱지(따뜻한 회백) + 출석 도장(주홍)
+   ============================================================ */
+:root{
+  --ink:      #1C2B45;   /* 교무수첩 표지 남색. 글자·헤더 */
+  --ink-70:   #4A5871;
+  --ink-45:   #7C8698;
+  --paper:    #EDEBE3;   /* 갱지 배경 */
+  --card:     #FAF9F5;   /* 카드 종이 */
+  --line:     #D6D2C4;   /* 괘선 */
+  --stamp:    #C4382B;   /* 출석부 도장 주홍. 결석·경고 */
+  --seal:     #2E6F63;   /* 청록. 확인·완료 */
+  --highlight:#F0C94A;   /* 형광펜 노랑. 선택 상태 */
+
+  --r: 3px;              /* 모서리는 거의 각지게 (서류 느낌) */
+  --tap: 48px;           /* 최소 터치 크기 */
+  --font-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: 'Gowun Batang', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+html,body{ margin:0; padding:0; }
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--font-body);
+  font-size:16px;
+  line-height:1.55;
+  /* 갱지의 미세한 결 */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(28,43,69,.022) 0 1px, transparent 1px 3px);
+  padding-bottom:calc(72px + env(safe-area-inset-bottom));
+}
+
+button{ font-family:inherit; font-size:inherit; cursor:pointer; }
+:focus-visible{ outline:2px solid var(--seal); outline-offset:2px; }
+
+.hidden{ display:none !important; }
+
+/* ---------- 공통 레이아웃 ---------- */
+.wrap{ max-width:760px; margin:0 auto; padding:0 16px; }
+
+.topbar{
+  position:sticky; top:0; z-index:20;
+  background:var(--ink); color:var(--paper);
+  padding:calc(10px + env(safe-area-inset-top)) 0 10px;
+  border-bottom:3px solid var(--stamp);
+}
+.topbar .wrap{ display:flex; align-items:baseline; gap:10px; }
+.topbar h1{
+  font-family:var(--font-display); font-weight:700;
+  font-size:19px; margin:0; letter-spacing:.02em;
+}
+.topbar .cls{
+  font-family:var(--font-mono); font-size:12px;
+  color:#B9C2D4; margin-left:auto;
+}
+
+/* ---------- 카드 ---------- */
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  padding:16px;
+  margin:16px 0;
+}
+.card > h2{
+  font-family:var(--font-display); font-weight:700;
+  font-size:17px; margin:0 0 4px;
+}
+.card .sub{ color:var(--ink-45); font-size:13px; margin:0 0 14px; }
+
+/* 섹션 라벨 — 서류의 항목 번호처럼 */
+.eyebrow{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.12em;
+  color:var(--stamp); text-transform:uppercase; display:block; margin-bottom:2px;
+}
+
+/* ---------- 버튼 ---------- */
+.btn{
+  min-height:var(--tap); padding:0 16px;
+  border:1.5px solid var(--ink); background:var(--card); color:var(--ink);
+  border-radius:var(--r); font-weight:600;
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+}
+.btn:active{ transform:translateY(1px); }
+.btn.primary{ background:var(--ink); color:var(--card); }
+.btn.danger{ border-color:var(--stamp); color:var(--stamp); }
+.btn.ghost{ border-color:var(--line); color:var(--ink-70); font-weight:500; }
+.btn.sm{ min-height:38px; padding:0 12px; font-size:14px; }
+.btn:disabled{ opacity:.4; cursor:not-allowed; }
+.btn-row{ display:flex; gap:8px; flex-wrap:wrap; }
+
+/* ---------- 입력 ---------- */
+label.field{ display:block; margin:12px 0 6px; font-size:13px; font-weight:600; color:var(--ink-70); }
+input[type=text], input[type=number], select, textarea{
+  width:100%; min-height:var(--tap); padding:10px 12px;
+  border:1.5px solid var(--line); border-radius:var(--r);
+  background:#fff; color:var(--ink); font-family:inherit; font-size:16px;
+}
+textarea{ min-height:130px; resize:vertical; font-family:var(--font-mono); font-size:14px; line-height:1.6; }
+input:focus, select:focus, textarea:focus{ border-color:var(--ink); outline:none; }
+
+/* ---------- 탭(입력 방식) ---------- */
+.seg{ display:flex; border:1.5px solid var(--ink); border-radius:var(--r); overflow:hidden; margin-bottom:14px; }
+.seg button{
+  flex:1; min-height:44px; border:0; background:transparent; color:var(--ink-70);
+  font-size:13.5px; font-weight:600; border-right:1px solid var(--line);
+}
+.seg button:last-child{ border-right:0; }
+.seg button[aria-selected="true"]{ background:var(--ink); color:var(--card); }
+
+/* ---------- 명렬표 ---------- */
+.roster{ border-top:1px solid var(--line); margin-top:12px; }
+.roster-row{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 4px; border-bottom:1px solid var(--line);
+}
+.roster-row .no{
+  font-family:var(--font-mono); font-size:13px; color:var(--ink-45);
+  width:34px; text-align:right; flex:none;
+}
+.roster-row .nm{ flex:1; font-weight:500; }
+.roster-row .del{
+  border:0; background:transparent; color:var(--ink-45);
+  min-width:40px; min-height:40px; font-size:18px;
+}
+.roster-row .del:hover{ color:var(--stamp); }
+
+.count-line{
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:13px; color:var(--ink-45); margin-top:10px;
+  font-family:var(--font-mono);
+}
+
+/* ---------- 미리보기 박스 ---------- */
+.preview{
+  background:#fff; border:1px dashed var(--ink-45); border-radius:var(--r);
+  padding:12px; margin-top:12px; max-height:240px; overflow:auto;
+}
+.preview .chip{
+  display:inline-block; margin:3px 4px 3px 0; padding:4px 9px;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
+  font-size:13px;
+}
+.preview .chip b{ font-family:var(--font-mono); font-weight:600; color:var(--ink-45); margin-right:5px; }
+
+/* ---------- 표시명 정책 ---------- */
+.policy{ display:grid; gap:8px; }
+.policy .opt{
+  display:flex; align-items:flex-start; gap:10px;
+  border:1.5px solid var(--line); border-radius:var(--r);
+  padding:12px; background:#fff; min-height:var(--tap);
+}
+.policy .opt[data-on="1"]{ border-color:var(--ink); background:var(--card); box-shadow:inset 3px 0 0 var(--stamp); }
+.policy .opt input{ margin-top:4px; width:20px; height:20px; flex:none; accent-color:var(--ink); }
+.policy .opt .t{ font-weight:600; font-size:14.5px; }
+.policy .opt .d{ font-size:12.5px; color:var(--ink-45); }
+.policy .opt .ex{ font-family:var(--font-mono); font-size:12.5px; color:var(--seal); }
+
+/* ============================================================
+   시그니처: 좌석표
+   ============================================================ */
+.board{
+  background:var(--ink); color:#C9D2E2;
+  font-family:var(--font-display); letter-spacing:.5em;
+  text-align:center; padding:9px; border-radius:var(--r);
+  font-size:13px; margin:18px 0 0;
+  border-top:4px solid #0F1A2C;   /* 칠판은 화면 아래 = 교사가 서는 쪽 */
+}
+
+/* 자리표 + 오른쪽 학생 목록 */
+.seatwrap{ display:flex; gap:10px; align-items:flex-start; }
+.seatmain{ flex:1; min-width:0; }
+.traycol{
+  width:92px; flex:none; border-left:1px solid var(--line); padding-left:10px;
+  position:sticky; top:64px; max-height:calc(100vh - 150px);
+  display:flex; flex-direction:column;
+}
+.traycol .tlabel{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--ink-45);
+  letter-spacing:.04em; margin-bottom:7px; flex:none;
+}
+.traycol .tlist{ overflow-y:auto; display:flex; flex-direction:column; gap:5px; padding-bottom:4px; }
+.traycol .tag{
+  min-height:44px; padding:5px 6px; width:100%;
+  border:1.5px solid var(--line); background:#fff; border-radius:var(--r);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  font-size:12.5px; line-height:1.2; word-break:keep-all;
+}
+.traycol .tag b{ font-family:var(--font-mono); font-size:10px; color:var(--ink-45); font-weight:600; }
+.traycol .tag[data-on="1"]{ background:var(--highlight); border-color:var(--ink); }
+.traycol .done{ font-size:12px; color:var(--seal); font-weight:600; text-align:center; padding:8px 0; }
+@media (max-width:420px){ .traycol{ width:74px; } .traycol .tag{ font-size:11.5px; } }
+.grid{ display:grid; gap:7px; }
+.seat{
+  min-height:58px; border:1.5px solid var(--line); border-radius:var(--r);
+  background:#fff; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:1px; padding:4px 2px;
+  transition:background .12s, border-color .12s, transform .12s;
+}
+.seat .sno{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-45); }
+.seat .snm{ font-size:13px; font-weight:600; line-height:1.15; text-align:center; word-break:keep-all; }
+.seat.empty{ border-style:dashed; border-color:#C9C4B4; background:transparent; }
+.seat.empty::after{ content:'빈자리'; font-size:11px; color:#B6B0A0; font-family:var(--font-mono); }
+.seat.filled{ border-color:var(--ink); }
+.seat.picked{ background:var(--highlight); border-color:var(--ink); }
+.seat.target{ border-color:var(--seal); border-style:solid; background:#EAF3F1; }
+.seat.placed{ animation:stamp .22s ease-out; }
+@keyframes stamp{ 0%{ transform:scale(.86); } 60%{ transform:scale(1.04); } 100%{ transform:scale(1); } }
+
+/* ---------- 하단 탭바 ---------- */
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:18;
+  background:var(--card); border-top:1px solid var(--line);
+  display:flex; padding-bottom:env(safe-area-inset-bottom);
+}
+.tabbar button{
+  flex:1; min-height:64px; border:0; background:transparent;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  color:var(--ink-45); font-size:11.5px; font-weight:600;
+}
+.tabbar button .ic{ font-size:19px; line-height:1; }
+.tabbar button[aria-selected="true"]{ color:var(--ink); box-shadow:inset 0 3px 0 var(--stamp); }
+.tabbar button:disabled{ opacity:.45; }
+
+/* ---------- 안내 / 경고 문구 ---------- */
+.notice{
+  border-left:3px solid var(--stamp); background:#FBF3F1;
+  padding:11px 13px; font-size:13px; line-height:1.6; color:var(--ink-70);
+  border-radius:0 var(--r) var(--r) 0; margin:14px 0;
+}
+.notice.calm{ border-left-color:var(--seal); background:#EFF5F3; }
+.footnote{
+  font-size:12px; color:var(--ink-45); line-height:1.65;
+  border-top:1px solid var(--line); padding:14px 0 26px; margin-top:8px;
+}
+
+/* ---------- 빈 화면 ---------- */
+.blank{ text-align:center; padding:64px 20px; color:var(--ink-45); }
+.blank .big{ font-family:var(--font-display); font-size:20px; color:var(--ink-70); margin-bottom:6px; }
+.blank .small{ font-size:13.5px; }
+
+/* ---------- 로그인 ---------- */
+#screen-login{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+#screen-login .box{ max-width:400px; width:100%; text-align:center; }
+#screen-login .mark{
+  font-family:var(--font-display); font-size:15px; letter-spacing:.35em;
+  color:var(--stamp); margin-bottom:10px;
+}
+#screen-login h1{ font-family:var(--font-display); font-size:31px; margin:0 0 8px; font-weight:700; }
+#screen-login .quote{
+  font-family:var(--font-display); font-size:15px; color:var(--ink-70);
+  line-height:1.8; margin:0 0 32px;
+}
+#screen-login .btn{ width:100%; margin-bottom:9px; }
+
+/* ---------- 모달 ---------- */
+.modal{
+  position:fixed; inset:0; z-index:40; background:rgba(28,43,69,.5);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.modal .box{
+  background:var(--card); border-radius:var(--r); border-top:5px solid var(--stamp);
+  padding:22px; max-width:400px; width:100%;
+}
+.modal h3{ font-family:var(--font-display); font-size:18px; margin:0 0 10px; }
+.modal p{ font-size:14px; line-height:1.65; color:var(--ink-70); margin:0 0 18px; }
+.modal .btn-row{ justify-content:flex-end; }
+
+/* ---------- 토스트 ---------- */
+#toast{
+  position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(84px + env(safe-area-inset-bottom)); z-index:50;
+  background:var(--ink); color:var(--card);
+  padding:11px 18px; border-radius:var(--r); font-size:14px; font-weight:500;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+#toast.on{ opacity:1; }
+
+/* ---------- 데모 배너 ---------- */
+#demoBanner{
+  background:var(--highlight); color:var(--ink);
+  font-size:12.5px; font-weight:600; text-align:center; padding:7px 16px;
+}
+
+/* ============================================================
+   Stage 2 — 조회 / 출석 / 시간표 / 일정
+   ============================================================ */
+
+/* 날짜 머리글 — 조회 화면의 첫인상 */
+.datehead{
+  background:var(--ink); color:var(--paper);
+  border-radius:var(--r); padding:18px 18px 16px; margin:16px 0;
+  border-bottom:4px solid var(--stamp);
+}
+.datehead .ymd{
+  font-family:var(--font-mono); font-size:12px; letter-spacing:.14em;
+  color:#9FADC6;
+}
+.datehead .big{
+  font-family:var(--font-display); font-weight:700;
+  font-size:28px; line-height:1.25; margin-top:2px;
+}
+.datehead .big em{ font-style:normal; color:var(--highlight); }
+.datehead .sum{
+  font-size:13px; color:#B9C2D4; margin-top:8px;
+  font-family:var(--font-mono);
+}
+
+/* 오늘 시간표 — 교시 번호가 정보다 */
+.periods{ display:grid; gap:6px; }
+.period{
+  display:flex; align-items:center; gap:12px;
+  border-bottom:1px solid var(--line); padding:9px 2px;
+}
+.period:last-child{ border-bottom:0; }
+.period .pn{
+  font-family:var(--font-mono); font-size:12px; color:var(--ink-45);
+  width:26px; flex:none; text-align:center;
+  border-right:2px solid var(--line); padding-right:10px;
+}
+.period .ps{ font-weight:600; font-size:15px; }
+.period .ps.none{ font-weight:400; color:var(--ink-45); }
+.period.changed .ps{ color:var(--stamp); }
+.period.changed::after{
+  content:'변경'; margin-left:auto; font-size:11px; font-family:var(--font-mono);
+  color:var(--stamp); border:1px solid var(--stamp); border-radius:2px; padding:1px 5px;
+}
+
+/* 시간표 편집 격자 */
+.tt-edit{ overflow-x:auto; }
+.tt-edit table{ border-collapse:collapse; width:100%; min-width:420px; }
+.tt-edit th{
+  font-family:var(--font-mono); font-size:11px; font-weight:600;
+  color:var(--ink-45); padding:6px 2px; border-bottom:1.5px solid var(--line);
+}
+.tt-edit td{ padding:2px; }
+.tt-edit input{
+  min-height:40px; font-size:14px; padding:6px 7px; text-align:center;
+  border-color:#E2DFD4;
+}
+
+/* 일정 / D-Day 목록 */
+.items{ display:grid; gap:8px; }
+.item{
+  display:flex; align-items:center; gap:11px;
+  border:1px solid var(--line); border-radius:var(--r);
+  background:#fff; padding:11px 13px; min-height:var(--tap);
+}
+.item .tag{
+  font-family:var(--font-mono); font-size:11px; font-weight:600;
+  border:1px solid var(--line); border-radius:2px; padding:2px 6px;
+  color:var(--ink-45); flex:none;
+}
+.item .ttl{ flex:1; font-weight:500; font-size:14.5px; word-break:keep-all; }
+.item .del{ border:0; background:transparent; color:var(--ink-45); min-width:40px; min-height:40px; font-size:17px; }
+.item .del:hover{ color:var(--stamp); }
+
+/* D-Day 배지 — 남은 날이 정보의 핵심 */
+.dd{
+  font-family:var(--font-mono); font-weight:600; font-size:13px;
+  border-radius:2px; padding:3px 8px; flex:none; min-width:56px; text-align:center;
+  border:1.5px solid var(--ink-45); color:var(--ink-45);
+}
+.dd.soon{ border-color:var(--stamp); color:var(--stamp); }
+.dd.today{ border-color:var(--stamp); background:var(--stamp); color:#fff; }
+.dd.past{ opacity:.4; }
+
+/* 당번 */
+.duty-line{
+  display:flex; align-items:baseline; gap:10px;
+  padding:9px 2px; border-bottom:1px solid var(--line);
+}
+.duty-line:last-child{ border-bottom:0; }
+.duty-line .k{
+  font-family:var(--font-mono); font-size:11.5px; color:var(--ink-45);
+  width:44px; flex:none;
+}
+.duty-line .v{ font-weight:600; font-size:14.5px; }
+.duty-line .v.none{ font-weight:400; color:var(--ink-45); }
+
+/* 출석 — 좌석 위 도장 */
+.seat.absent{ background:#FBEDEA; border-color:var(--stamp); }
+.seat.absent .snm{ color:var(--stamp); text-decoration:line-through; }
+.seat.late{ background:#FDF6E0; border-color:#C9A227; }
+.seat.late .snm{ color:#8A6D12; }
+.seat .mark{
+  position:absolute; top:3px; right:5px;
+  font-family:var(--font-mono); font-size:10px; font-weight:600;
+}
+.seat.absent .mark{ color:var(--stamp); }
+.seat.late .mark{ color:#8A6D12; }
+.seat{ position:relative; }
+.seat.readonly{ cursor:default; }
+
+/* 출석 요약 */
+.tally{ display:flex; gap:8px; margin-top:12px; }
+.tally div{
+  flex:1; border:1px solid var(--line); border-radius:var(--r);
+  background:#fff; padding:9px 6px; text-align:center;
+}
+.tally .n{ font-family:var(--font-mono); font-size:20px; font-weight:600; display:block; }
+.tally .l{ font-size:11.5px; color:var(--ink-45); }
+.tally .a .n{ color:var(--seal); }
+.tally .b .n{ color:var(--stamp); }
+.tally .c .n{ color:#8A6D12; }
+
+/* 복사용 문구 */
+.copybox{
+  background:#fff; border:1px solid var(--line); border-radius:var(--r);
+  padding:12px; font-size:13.5px; line-height:1.7; margin:10px 0;
+  white-space:pre-wrap; word-break:keep-all;
+}
+
+/* 당번 그룹 */
+.dgroup{
+  border:1.5px solid var(--line); border-radius:var(--r); background:#fff;
+  padding:11px 12px; margin-bottom:8px;
+}
+.dgroup .top{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.dgroup .gn{ font-weight:600; font-size:14.5px; }
+.dgroup .gm{ font-family:var(--font-mono); font-size:11px; color:var(--ink-45); flex:1; }
+.dgroup .gx{ border:0; background:transparent; color:var(--ink-45); min-width:36px; min-height:36px; font-size:16px; }
+.dgroup .gpick{
+  border:1.5px solid var(--line); background:var(--card); border-radius:var(--r);
+  min-height:34px; padding:0 10px; font-size:12.5px; font-weight:600;
+}
+.dgroup .sel{ margin-top:9px; display:flex; flex-wrap:wrap; gap:5px; }
+.dgroup .sel .s{
+  font-size:12.5px; border:1px solid var(--ink); background:var(--highlight);
+  border-radius:2px; padding:3px 7px;
+}
+.dgroup .sel .s i{ font-family:var(--font-mono); font-style:normal; color:var(--ink-70); margin-right:4px; }
+.dgroup .pool{ margin-top:9px; display:flex; flex-wrap:wrap; gap:5px; }
+.dgroup .pool button{
+  font-size:12.5px; border:1px solid var(--line); background:#fff;
+  border-radius:2px; padding:5px 8px; min-height:34px;
+}
+.dgroup .pool button[data-on="1"]{ background:var(--highlight); border-color:var(--ink); font-weight:600; }
+.dgroup .hint{ font-size:12px; color:var(--ink-45); margin-top:8px; line-height:1.6; width:100%; }
+
+/* 당번 미리보기 */
+.dprev{ overflow-x:auto; }
+.dprev table{ border-collapse:collapse; width:100%; min-width:340px; }
+.dprev th, .dprev td{ border:1px solid var(--line); padding:7px 8px; font-size:12.5px; text-align:center; }
+.dprev th{ background:#F3F1EA; font-family:var(--font-mono); font-size:11px; color:var(--ink-70); }
+.dprev td.k{ background:#F9F8F4; font-weight:600; text-align:left; white-space:nowrap; }
+.dprev td.today{ background:#FBF3F1; font-weight:600; }
+
+/* 관리 탭 카드 접기 */
+.card.fold > .cardhead{
+  display:flex; align-items:center; gap:9px; cursor:pointer; min-height:var(--tap);
+}
+.card.fold > .cardhead .ht{ flex:1; }
+.card.fold > .cardhead .ht h2{ margin:0; }
+.card.fold > .cardhead .hc{
+  font-family:var(--font-mono); font-size:14px; color:var(--ink-45);
+  flex:none; width:24px; text-align:center;
+}
+.card.fold[data-open="0"] > .cardbody{ display:none; }
+.foldbar{ display:flex; gap:8px; margin:16px 0 -6px; }
+.foldbar .btn{ min-height:36px; padding:0 11px; font-size:12.5px; }
+
+/* 접이식 상세 */
+details.fold{ border:1px solid var(--line); border-radius:var(--r); background:#fff; margin-top:10px; }
+details.fold > summary{
+  min-height:var(--tap); display:flex; align-items:center;
+  padding:0 13px; font-size:14px; font-weight:600; cursor:pointer; list-style:none;
+}
+details.fold > summary::-webkit-details-marker{ display:none; }
+details.fold > summary::after{ content:'▾'; margin-left:auto; color:var(--ink-45); }
+details.fold[open] > summary::after{ content:'▴'; }
+details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
+
+/* ============================================================
+   Stage 3 — 학생 화면 / 공개 설정
+   ============================================================ */
+
+/* 공개 항목 켜고 끄기 */
+.toggles{ display:grid; gap:7px; }
+.toggle{
+  display:flex; align-items:center; gap:12px;
+  border:1.5px solid var(--line); border-radius:var(--r);
+  background:#fff; padding:11px 13px; min-height:var(--tap);
+}
+.toggle[data-on="1"]{ border-color:var(--seal); box-shadow:inset 3px 0 0 var(--seal); }
+.toggle input{ width:22px; height:22px; flex:none; accent-color:var(--seal); }
+.toggle .t{ font-weight:600; font-size:14.5px; }
+.toggle .d{ font-size:12px; color:var(--ink-45); }
+
+/* 절대 공개하지 않는 항목 안내 */
+.never{
+  font-size:12.5px; color:var(--ink-45); line-height:1.7;
+  background:#F3F1EA; border:1px solid var(--line); border-radius:var(--r);
+  padding:11px 13px; margin-top:12px;
+}
+.never b{ color:var(--ink-70); }
+
+/* 링크 · QR */
+.linkbox{
+  display:flex; gap:8px; align-items:center; margin-top:12px;
+  border:1px solid var(--line); border-radius:var(--r); background:#fff; padding:9px 11px;
+}
+.linkbox code{
+  flex:1; font-family:var(--font-mono); font-size:12px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-70);
+}
+#qrBox{ text-align:center; padding:16px 0 4px; }
+#qrBox canvas{ border:8px solid #fff; border-radius:var(--r); }
+
+/* 상태 점 — 반영 여부 */
+.syncline{
+  display:flex; align-items:center; gap:8px;
+  font-size:12.5px; color:var(--ink-45); margin-top:12px;
+  font-family:var(--font-mono);
+}
+.syncline .dot{ width:8px; height:8px; border-radius:50%; background:var(--ink-45); flex:none; }
+.syncline.on .dot{ background:var(--seal); }
+.syncline.off .dot{ background:var(--stamp); }
+
+/* ---------- 학생 화면 ----------
+   교사 화면과 확실히 구분되도록 밝은 배경 + 노란 강조 */
+#screen-student{ min-height:100vh; padding-bottom:40px; }
+#screen-student .stop{
+  background:var(--highlight); color:var(--ink);
+  padding:calc(14px + env(safe-area-inset-top)) 0 14px;
+  border-bottom:3px solid var(--ink);
+}
+#screen-student .stop .wrap{ display:flex; align-items:baseline; gap:10px; }
+#screen-student .stop h1{ font-family:var(--font-display); font-size:20px; margin:0; font-weight:700; }
+#screen-student .stop .d{ margin-left:auto; font-family:var(--font-mono); font-size:12px; }
+#screen-student .card{ background:#fff; }
+#screen-student .foot{
+  text-align:center; font-size:11.5px; color:var(--ink-45);
+  font-family:var(--font-mono); padding:20px 16px 40px;
+}
+
+/* 비밀번호 잠금 */
+#studentGate{ padding:60px 24px; text-align:center; max-width:360px; margin:0 auto; }
+#studentGate .lock{ font-size:34px; margin-bottom:10px; }
+#studentGate h2{ font-family:var(--font-display); font-size:21px; margin:0 0 6px; }
+#studentGate p{ font-size:13.5px; color:var(--ink-45); margin:0 0 22px; }
+#studentGate input{ text-align:center; font-family:var(--font-mono); letter-spacing:.2em; margin-bottom:10px; }
+
+/* 미리보기 겹침 화면 */
+#previewLayer{
+  position:fixed; inset:0; z-index:45; background:var(--paper); overflow:auto;
+}
+#previewLayer .bar{
+  position:sticky; top:0; z-index:2;
+  background:var(--ink); color:var(--paper);
+  display:flex; align-items:center; gap:10px;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+  font-size:13px; font-weight:600;
+}
+#previewLayer .bar button{
+  margin-left:auto; min-height:38px; padding:0 14px;
+  border:1.5px solid var(--paper); background:transparent; color:var(--paper);
+  border-radius:var(--r); font-weight:600;
+}
+
+
+/* ============================================================
+   Stage 4 — 이름 잠금 / 약관 / 푸터
+   ============================================================ */
+.lockstate{
+  display:flex; align-items:center; gap:9px;
+  border:1.5px solid var(--line); border-radius:var(--r);
+  background:#fff; padding:11px 13px; margin-bottom:14px;
+  font-size:14px; font-weight:600;
+}
+.lockstate .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+.lockstate[data-s="none"]{ border-color:var(--stamp); }
+.lockstate[data-s="none"] .dot{ background:var(--stamp); }
+.lockstate[data-s="locked"] .dot{ background:#C9A227; }
+.lockstate[data-s="open"]{ border-color:var(--seal); }
+.lockstate[data-s="open"] .dot{ background:var(--seal); }
+.lockstate .sm2{ margin-left:auto; font-size:11.5px; font-weight:400; color:var(--ink-45); font-family:var(--font-mono); }
+
+/* 푸터 */
+.appfoot{
+  border-top:1px solid var(--line); margin-top:8px;
+  padding:20px 16px calc(30px + env(safe-area-inset-bottom));
+  text-align:center; font-size:12.5px; color:var(--ink-45);
+}
+.appfoot a{ color:var(--ink-70); text-decoration:underline; text-underline-offset:2px; }
+.appfoot .sep{ margin:0 8px; color:var(--line); }
+.appfoot .jstd{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.14em;
+  margin-top:12px; color:var(--ink-45);
+}
+
+/* 약관 문서 */
+#legalLayer{ position:fixed; inset:0; z-index:60; background:var(--paper); overflow:auto; }
+#legalLayer .bar{
+  position:sticky; top:0; z-index:2; background:var(--ink); color:var(--paper);
+  display:flex; align-items:center; gap:10px;
+  padding:calc(11px + env(safe-area-inset-top)) 16px 11px;
+  font-family:var(--font-display); font-size:15px; font-weight:700;
+}
+#legalLayer .bar button{
+  margin-left:auto; min-height:38px; padding:0 14px;
+  border:1.5px solid var(--paper); background:transparent; color:var(--paper);
+  border-radius:var(--r); font-weight:600; font-family:var(--font-body);
+}
+.doc{ max-width:720px; margin:0 auto; padding:8px 18px 60px; }
+.doc h3{
+  font-family:var(--font-display); font-size:17px; margin:26px 0 8px;
+  padding-bottom:6px; border-bottom:1px solid var(--line);
+}
+.doc h3:first-of-type{ margin-top:14px; }
+.doc p, .doc li{ font-size:14px; line-height:1.75; color:var(--ink-70); }
+.doc ul{ padding-left:20px; margin:6px 0; }
+.doc li{ margin-bottom:4px; }
+.doc .rev{ font-family:var(--font-mono); font-size:11.5px; color:var(--ink-45); margin-top:4px; }
+.doc table{ width:100%; border-collapse:collapse; margin:10px 0; }
+.doc th, .doc td{
+  border:1px solid var(--line); padding:8px 10px; font-size:13px;
+  text-align:left; vertical-align:top; color:var(--ink-70);
+}
+.doc th{ background:#F3F1EA; font-weight:600; color:var(--ink); }
+.doc .warn{
+  border-left:3px solid var(--stamp); background:#FBF3F1;
+  padding:11px 13px; font-size:13.5px; line-height:1.7; margin:12px 0;
+  border-radius:0 var(--r) var(--r) 0;
+}
+
+
+
+
+/* ============================================================
+   조회 체크리스트 / 급식
+   ============================================================ */
+.ck{ display:grid; gap:6px; }
+.ckrow{
+  display:flex; align-items:flex-start; gap:11px;
+  border:1px solid var(--line); border-radius:var(--r); background:#fff;
+  padding:11px 12px; min-height:var(--tap);
+}
+.ckrow input{ width:22px; height:22px; flex:none; margin-top:1px; accent-color:var(--seal); }
+.ckrow .t{ flex:1; font-size:14.5px; line-height:1.5; word-break:keep-all; }
+.ckrow[data-done="1"]{ background:#F4F6F4; border-color:#CBD8D3; }
+.ckrow[data-done="1"] .t{ color:var(--ink-45); text-decoration:line-through; }
+.ckrow .pin{
+  font-family:var(--font-mono); font-size:10px; color:var(--ink-45);
+  border:1px solid var(--line); border-radius:2px; padding:1px 5px; flex:none; margin-top:2px;
+}
+.ckrow .x{ border:0; background:transparent; color:var(--ink-45); min-width:36px; min-height:36px; font-size:16px; flex:none; }
+.ckrow .x:hover{ color:var(--stamp); }
+.ckbar{
+  display:flex; align-items:center; gap:8px; margin-top:10px;
+  font-family:var(--font-mono); font-size:12px; color:var(--ink-45);
+}
+.ckbar .track{ flex:1; height:5px; background:var(--line); border-radius:3px; overflow:hidden; display:block; }
+.ckbar .fill{ height:100%; background:var(--seal); width:0; transition:width .25s; display:block; }
+.ckdone{ text-align:center; padding:14px 8px; font-family:var(--font-display); font-size:15px; color:var(--seal); }
+
+/* 급식 */
+.meal{ display:grid; gap:4px; }
+.meal .dish{
+  display:flex; align-items:baseline; gap:8px;
+  border-bottom:1px solid var(--line); padding:6px 2px; font-size:14.5px;
+}
+.meal .dish:last-child{ border-bottom:0; }
+.meal .dish .al{ font-family:var(--font-mono); font-size:10.5px; color:var(--stamp); flex:none; }
+.meal .kcal{ font-family:var(--font-mono); font-size:11.5px; color:var(--ink-45); margin-top:9px; text-align:right; }
+.schoolpick{ display:grid; gap:6px; margin-top:10px; }
+.schoolpick button{
+  text-align:left; border:1.5px solid var(--line); background:#fff;
+  border-radius:var(--r); padding:11px 12px; min-height:var(--tap);
+}
+.schoolpick button b{ display:block; font-size:14.5px; }
+.schoolpick button span{ font-size:12px; color:var(--ink-45); }
+.schoolnow{
+  display:flex; align-items:center; gap:8px; font-size:13.5px;
+  border:1px solid var(--line); border-radius:var(--r); background:#fff;
+  padding:10px 12px; margin-top:10px;
+}
+.schoolnow b{ flex:1; }
+
+/* ============================================================
+   소개 페이지
+   ============================================================ */
+#screen-intro{ min-height:100vh; }
+.intro{ max-width:620px; margin:0 auto; padding:0 18px 60px; }
+
+/* ① 첫 화면 */
+.hero{ padding:52px 0 40px; text-align:center; }
+.hero .badge{
+  display:inline-block; font-family:var(--font-mono); font-size:10.5px;
+  letter-spacing:.2em; color:var(--stamp);
+  border:1px solid var(--stamp); border-radius:2px; padding:3px 9px; margin-bottom:18px;
+}
+.hero h1{
+  font-family:var(--font-display); font-weight:700; font-size:44px;
+  margin:0 0 14px; letter-spacing:-.01em;
+}
+.hero .lead{
+  font-family:var(--font-display); font-size:19px; line-height:1.7;
+  color:var(--ink); margin:0 0 16px;
+}
+.hero .who{ font-size:13.5px; color:var(--ink-45); margin:0 0 28px; line-height:1.7; }
+.hero .cta{ display:flex; gap:9px; justify-content:center; flex-wrap:wrap; }
+.hero .cta .btn{ min-width:168px; }
+.hero .free{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-45);
+  margin-top:16px; letter-spacing:.04em;
+}
+
+/* 구간 공통 */
+.isec{ padding:36px 0; border-top:1px solid var(--line); }
+.isec .num{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.16em;
+  color:var(--stamp); display:block; margin-bottom:7px;
+}
+.isec h2{ font-family:var(--font-display); font-size:23px; font-weight:700; margin:0 0 10px; line-height:1.4; }
+.isec p{ font-size:14.5px; line-height:1.8; color:var(--ink-70); margin:0 0 14px; }
+.isec p b{ color:var(--ink); }
+
+/* 지금 vs Johoe */
+.vs{ display:flex; gap:10px; margin:18px 0; }
+.vs > div{ flex:1; border:1px solid var(--line); border-radius:var(--r); padding:13px; background:#fff; }
+.vs .now{ background:#F3F1EA; }
+.vs h4{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.1em;
+  margin:0 0 9px; color:var(--ink-45);
+}
+.vs .new h4{ color:var(--seal); }
+.vs ol{ margin:0; padding-left:17px; }
+.vs li{ font-size:13px; line-height:1.75; color:var(--ink-70); }
+.vs .new li{ color:var(--ink); }
+@media (max-width:460px){ .vs{ flex-direction:column; } }
+
+/* 특징 3개 */
+.feats{ display:grid; gap:11px; margin-top:6px; }
+.feat{
+  display:flex; gap:13px; align-items:flex-start;
+  border:1px solid var(--line); border-radius:var(--r); background:#fff; padding:14px;
+}
+.feat .fm{ flex:none; width:118px; }
+.feat .ft{ flex:1; min-width:0; }
+.feat .ft b{ display:block; font-size:14.5px; margin-bottom:3px; }
+.feat .ft span{ font-size:13px; color:var(--ink-45); line-height:1.65; }
+@media (max-width:460px){
+  .feat{ flex-direction:column; }
+  .feat .fm{ width:100%; }
+}
+
+/* ---------- 축소판 화면 목업 ---------- */
+.mk{ border:1px solid var(--line); border-radius:2px; background:var(--card); padding:7px; }
+.mk-board{
+  background:var(--ink); color:#9FADC6; font-family:var(--font-display);
+  font-size:7px; letter-spacing:.3em; text-align:center; padding:3px; border-radius:1px;
+  margin-top:5px; border-top:2px solid #0F1A2C;
+}
+.mk-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:3px; }
+.mk-s{
+  aspect-ratio:1/.78; border:1px solid var(--line); background:#fff; border-radius:1px;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-mono); font-size:7px; color:var(--ink-45);
+}
+.mk-s.ab{ background:#FBEDEA; border-color:var(--stamp); color:var(--stamp); font-weight:600; }
+.mk-s.lt{ background:#FDF6E0; border-color:#C9A227; color:#8A6D12; font-weight:600; }
+
+.mk-dd{ display:flex; flex-direction:column; gap:4px; }
+.mk-dd .r{ display:flex; align-items:center; gap:5px; }
+.mk-dd .b{
+  font-family:var(--font-mono); font-size:8px; font-weight:600; padding:1px 4px;
+  border:1px solid var(--ink-45); color:var(--ink-45); border-radius:1px; flex:none;
+}
+.mk-dd .b.s{ border-color:var(--stamp); color:var(--stamp); }
+.mk-dd .b.t{ border-color:var(--stamp); background:var(--stamp); color:#fff; }
+.mk-dd .n{ font-size:9.5px; color:var(--ink-70); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+.mk-tb{ width:100%; border-collapse:collapse; }
+.mk-tb td, .mk-tb th{
+  border:1px solid var(--line); font-size:8px; padding:2px 3px; text-align:center; color:var(--ink-70);
+}
+.mk-tb th{ background:#F3F1EA; font-family:var(--font-mono); font-size:7px; }
+.mk-tb td.k{ background:#F9F8F4; font-weight:600; text-align:left; }
+
+/* 학생 화면 폰 목업 */
+.phone{
+  width:196px; margin:20px auto 0; border:7px solid var(--ink);
+  border-radius:16px; overflow:hidden; background:#fff;
+  box-shadow:0 6px 0 rgba(28,43,69,.08);
+}
+.phone .ph{
+  background:var(--highlight); color:var(--ink); padding:8px 10px;
+  display:flex; align-items:baseline; gap:6px; border-bottom:2px solid var(--ink);
+}
+.phone .ph b{ font-family:var(--font-display); font-size:12px; }
+.phone .ph span{ font-family:var(--font-mono); font-size:8px; margin-left:auto; }
+.phone .pb{ padding:9px 10px 12px; }
+.phone .pt{
+  font-family:var(--font-mono); font-size:7.5px; letter-spacing:.1em;
+  color:var(--stamp); margin:0 0 4px;
+}
+.phone .pr{
+  display:flex; gap:6px; font-size:9.5px; color:var(--ink-70);
+  border-bottom:1px solid var(--line); padding:3px 0;
+}
+.phone .pr i{ font-family:var(--font-mono); font-style:normal; color:var(--ink-45); width:8px; }
+.phone .pd{ margin-top:9px; }
+
+/* 인용 */
+.quote-big{
+  font-family:var(--font-display); font-size:19px; line-height:1.65;
+  border-left:3px solid var(--stamp); padding:2px 0 2px 15px; margin:4px 0 16px;
+  color:var(--ink);
+}
+
+/* ④ 사용 방식 카드 3개 */
+.ways{ display:grid; gap:9px; margin:16px 0; }
+.way{ border:1px solid var(--line); border-radius:var(--r); background:#fff; padding:13px; }
+.way b{ display:block; font-size:14.5px; margin-bottom:4px; }
+.way span{ font-size:12.5px; color:var(--ink-45); line-height:1.65; }
+.way.a{ box-shadow:inset 4px 0 0 var(--seal); }
+.way.b{ box-shadow:inset 4px 0 0 var(--highlight); }
+.way.c{ box-shadow:inset 4px 0 0 var(--ink-45); }
+
+/* 체크 목록 */
+.checks{ margin:12px 0; display:grid; gap:7px; }
+.checks div{ font-size:14px; color:var(--ink-70); display:flex; gap:9px; line-height:1.65; }
+.checks div i{ color:var(--seal); font-style:normal; font-weight:700; flex:none; }
+
+/* ⑥ 마무리 */
+.outro{ text-align:center; padding:40px 0 10px; border-top:1px solid var(--line); }
+.outro h2{ font-family:var(--font-display); font-size:21px; margin:0 0 18px; }
+.outro .cta{ display:flex; gap:9px; justify-content:center; flex-wrap:wrap; }
+.outro .cta .btn{ min-width:168px; }
+
+/* ============================================================
+   Stage 5 — 사용 방식 선택
+   ============================================================ */
+#screen-setup{ min-height:100vh; }
+.setup-mark{
+  font-family:var(--font-display); font-size:13px; letter-spacing:.34em;
+  color:var(--stamp); margin-bottom:8px;
+}
+.setup-h{ font-family:var(--font-display); font-size:27px; font-weight:700; margin:0 0 6px; }
+.setup-p{ font-size:14px; color:var(--ink-45); margin:0 0 24px; }
+
+.pick{
+  display:block; width:100%; text-align:left;
+  border:1.5px solid var(--line); border-radius:var(--r);
+  background:var(--card); padding:16px; margin-bottom:11px;
+}
+.pick:hover{ border-color:var(--ink); }
+.pick:active{ transform:translateY(1px); }
+.pick .pt{
+  display:block; font-family:var(--font-display); font-weight:700;
+  font-size:17px; margin-bottom:6px;
+}
+.pick .pd{ display:block; font-size:13.5px; line-height:1.7; color:var(--ink-70); }
+.pick .pm{
+  display:block; margin-top:9px; padding-top:9px; border-top:1px solid var(--line);
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-45); letter-spacing:.02em;
+}
+.pick[data-preset="cloud"]{ box-shadow:inset 4px 0 0 var(--seal); }
+.pick[data-preset="local"]{ box-shadow:inset 4px 0 0 var(--highlight); }
+.pick[data-preset="number"]{ box-shadow:inset 4px 0 0 var(--ink-45); }
+
+/* 현재 사용 방식 표시 */
+.modechip{
+  display:inline-block; font-family:var(--font-mono); font-size:11px;
+  border:1px solid var(--line); border-radius:2px; padding:2px 7px;
+  color:var(--ink-45); margin-right:5px;
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation:none !important; transition:none !important; }
+}
+</style>
+</head>
+
+<body>
+
+<!-- =========================================================
+     소개 페이지  (#/about)
+     처음 온 사람과 앱을 처음 켠 사람을 함께 상대한다.
+     ① 철학 → ② 시간 절약 → ③ 학생 화면 → ④ 개인정보 → ⑤ 진입장벽 → ⑥ 시작
+     ========================================================= -->
+<div id="screen-intro" class="hidden">
+  <div class="intro">
+
+    <!-- ① 첫 화면 -->
+    <div class="hero">
+      <span class="badge">아 침 조 회</span>
+      <h1>Johoe</h1>
+      <p class="lead">조회 시간을 줄이면,<br>학생과 눈 마주칠 시간이 늘어납니다.</p>
+      <p class="who">현직 중학교 교사가 자기 아침을 줄이려고 만들었습니다.</p>
+      <div class="cta">
+        <button class="btn primary" data-intro="demo">설명 없이 둘러보기</button>
+        <button class="btn" data-intro="start">바로 시작하기</button>
+      </div>
+      <p class="free">설치 없음 · 가입 없음 · 무료</p>
+    </div>
+
+    <!-- ② 아침이 달라집니다 -->
+    <section class="isec">
+      <span class="num">01</span>
+      <h2>수첩을 덮고, 화면 하나만 봅니다</h2>
+      <p>조회는 매일 똑같은 일을 반복합니다. 그런데 그 똑같은 일을 매일 기억으로 처리합니다.</p>
+
+      <div class="vs">
+        <div class="now">
+          <h4>지금</h4>
+          <ol>
+            <li>교무수첩을 펼친다</li>
+            <li>오늘 뭐가 있었는지 더듬는다</li>
+            <li>말로 쭉 전달한다</li>
+            <li>학생이 다시 물어본다</li>
+          </ol>
+        </div>
+        <div class="new">
+          <h4>JOHOE</h4>
+          <ol>
+            <li>화면을 켠다</li>
+            <li>오늘 것만 이미 정리돼 있다</li>
+            <li>안 온 학생만 누른다</li>
+            <li>학생이 알아서 확인한다</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="feats">
+        <div class="feat">
+          <div class="fm">
+            <div class="mk">
+              <div class="mk-grid">
+                <div class="mk-s">25</div><div class="mk-s">26</div><div class="mk-s">27</div><div class="mk-s">28</div><div class="mk-s"></div>
+                <div class="mk-s">20</div><div class="mk-s ab">결</div><div class="mk-s">22</div><div class="mk-s">23</div><div class="mk-s">24</div>
+                <div class="mk-s">15</div><div class="mk-s">16</div><div class="mk-s">17</div><div class="mk-s lt">지</div><div class="mk-s">19</div>
+                <div class="mk-s">10</div><div class="mk-s">11</div><div class="mk-s">12</div><div class="mk-s">13</div><div class="mk-s">14</div>
+              </div>
+              <div class="mk-board">칠 판</div>
+            </div>
+          </div>
+          <div class="ft">
+            <b>출석은 안 온 학생만</b>
+            <span>전원 출석으로 시작합니다. 빈 자리만 누르면 끝입니다.
+            누를 때마다 지각 → 결석으로 바뀌고, 조회를 마치면 연락이 필요한 학생만 따로 모아 줍니다.</span>
+          </div>
+        </div>
+
+        <div class="feat">
+          <div class="fm">
+            <div class="mk">
+              <div class="mk-dd">
+                <div class="r"><span class="b t">TODAY</span><span class="n">영어 수행평가</span></div>
+                <div class="r"><span class="b s">D-3</span><span class="n">체험학습 신청</span></div>
+                <div class="r"><span class="b s">D-6</span><span class="n">기말고사</span></div>
+                <div class="r"><span class="b">D-24</span><span class="n">고입 원서 접수</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="ft">
+            <b>일정은 외우지 않습니다</b>
+            <span>수행평가·지필평가·고입 일정을 한 번 넣어두면 남은 날이 저절로 계산됩니다.
+            깜빡해서 학생에게 못 알려주는 일이 없어집니다.</span>
+          </div>
+        </div>
+
+        <div class="feat">
+          <div class="fm">
+            <div class="mk">
+              <table class="mk-tb">
+                <tr><th></th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th></tr>
+                <tr><td class="k">칠판</td><td>가</td><td>나</td><td>다</td><td>라</td><td>마</td></tr>
+                <tr><td class="k">청소</td><td>1~4</td><td>5~8</td><td>9~12</td><td>13~</td><td>17~</td></tr>
+              </table>
+            </div>
+          </div>
+          <div class="ft">
+            <b>당번은 스스로 돌아갑니다</b>
+            <span>학기 초에 칠판 당번 다섯 명을 뽑아두면 월·화·수·목·금 순서대로 자동으로 돕니다.
+            전체 번호순으로 돌리는 청소 당번도 함께 쓸 수 있습니다. 주말은 건너뜁니다.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ 학생이 직접 확인 -->
+    <section class="isec">
+      <span class="num">02</span>
+      <h2>같은 질문을 서른 번 받지 않습니다</h2>
+      <p class="quote-big">"선생님, 수행평가 언제예요?"</p>
+      <p>학생용 화면을 링크나 QR로 한 번만 주면 됩니다. 오늘 시간표, 바뀐 교시, 준비물,
+      수행평가와 고입 일정을 학생이 직접 확인합니다. <b>선생님이 따로 올릴 일은 없습니다.</b></p>
+
+      <div class="phone">
+        <div class="ph"><b>3학년 1반</b><span>7. 30 (목)</span></div>
+        <div class="pb">
+          <p class="pt">오늘 시간표</p>
+          <div class="pr"><i>1</i>국어</div>
+          <div class="pr"><i>2</i>수학</div>
+          <div class="pr"><i>3</i>영어</div>
+          <div class="pd">
+            <p class="pt">다가오는 일정</p>
+            <div class="mk-dd">
+              <div class="r"><span class="b s">D-3</span><span class="n">체험학습 신청</span></div>
+              <div class="r"><span class="b">D-24</span><span class="n">고입 원서 접수</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top:18px;">이 화면에는 <b>학생 이름과 출결 기록이 들어가지 않습니다.</b>
+      선생님이 켠 항목만 올라가고, 당번은 이름 없이 번호로만 보입니다.</p>
+    </section>
+
+    <!-- ④ 개인정보 -->
+    <section class="isec">
+      <span class="num">03</span>
+      <h2>학생 정보를 다루는 방식을 고를 수 있습니다</h2>
+      <p>학교 사정이 다 다릅니다. 그래서 하나를 강요하지 않습니다.</p>
+
+      <div class="ways">
+        <div class="way a">
+          <b>학교 승인 후 동기화</b>
+          <span>교무실 컴퓨터와 교실 태블릿에서 같은 자료를 씁니다.
+          공문 결재와 개인정보 동의서가 필요합니다.</span>
+        </div>
+        <div class="way b">
+          <b>내 기기에서만</b>
+          <span>서버로 아무것도 보내지 않습니다. 설정 없이 바로 시작하고,
+          옮길 때는 파일로 내보냅니다.</span>
+        </div>
+        <div class="way c">
+          <b>번호만 사용</b>
+          <span>이름을 아예 넣지 않고 학번이나 번호로만 운영합니다.
+          개인정보 위험이 가장 낮습니다.</span>
+        </div>
+      </div>
+
+      <p>실명을 쓰는 경우, 이름은 <b>선생님 기기에서 암호로 잠근 뒤</b> 저장됩니다.
+      암호와 열쇠는 서버로 전송되지 않습니다. 전화번호·주소·생년월일은 입력란 자체가 없습니다.</p>
+      <p style="font-size:13px; color:var(--ink-45);">
+        자세한 내용은 <a href="#" data-legal="privacy" style="color:var(--ink-70);">개인정보 처리방침</a>과
+        <a href="#" data-legal="terms" style="color:var(--ink-70);">이용약관</a>에 적어 두었습니다.
+        학생 정보를 넣기 전에 학교 개인정보 담당자와 확인해 주세요.
+      </p>
+    </section>
+
+    <!-- ⑤ 진입 장벽 -->
+    <section class="isec">
+      <span class="num">04</span>
+      <h2>시작하는 데 준비할 것은 없습니다</h2>
+      <div class="checks">
+        <div><i>✓</i><span>앱을 내려받지 않습니다. 주소만 열면 됩니다.</span></div>
+        <div><i>✓</i><span>가입하지 않습니다. 「내 기기에서만」과 「번호만 사용」은 로그인도 없습니다.</span></div>
+        <div><i>✓</i><span>돈이 들지 않습니다.</span></div>
+        <div><i>✓</i><span>배울 것이 없습니다. 명단을 넣고 이름 → 엔터를 반복하면 됩니다.</span></div>
+      </div>
+      <p>여러 기기에서 함께 쓰는 <b>동기화만</b> 별도 설정이 필요하고, 그것도
+      학교 결재를 받은 뒤에 해도 늦지 않습니다. 먼저 혼자 써 보고 결정하시면 됩니다.</p>
+    </section>
+
+    <!-- ⑥ 마무리 -->
+    <div class="outro">
+      <h2>내일 아침부터 써 보세요</h2>
+      <div class="cta">
+        <button class="btn primary" data-intro="demo">설명 없이 둘러보기</button>
+        <button class="btn" data-intro="start">바로 시작하기</button>
+      </div>
+      <div class="appfoot" style="border:0;">
+        <a href="#" data-legal="privacy">개인정보 처리방침</a><span class="sep">·</span><a href="#" data-legal="terms">이용약관</a>
+        <div class="jstd">Made by JSTD</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================
+     사용 방식 선택 (최초 1회)
+     화면에는 프리셋 3개를 보여주고, 내부에서는
+     저장 위치(backend) x 이름 사용(nameMode) 두 스위치로 처리합니다.
+     ========================================================= -->
+<div id="screen-setup" class="hidden">
+  <div class="wrap" style="max-width:540px; padding-top:36px;">
+    <div class="setup-mark">사 용 방 식</div>
+    <h1 class="setup-h">어떻게 쓰시겠어요?</h1>
+    <p class="setup-p">학교 상황에 맞는 것을 고르세요. 나중에 관리 화면에서 바꿀 수 있습니다.</p>
+
+    <button class="pick" data-preset="cloud">
+      <span class="pt">학교 승인 후 동기화</span>
+      <span class="pd">
+        교무실 컴퓨터와 교실 태블릿에서 같은 자료를 씁니다.
+        학생 이름은 선생님 기기에서 암호로 잠근 뒤 저장합니다.<br>
+        <b style="color:var(--stamp);">공문 결재와 개인정보 수집·이용 동의서가 필요합니다.</b>
+      </span>
+      <span class="pm">필요: Firebase 설정 · 구글 로그인</span>
+    </button>
+
+    <button class="pick" data-preset="local">
+      <span class="pt">내 기기에서만</span>
+      <span class="pd">
+        설정 없이 바로 시작합니다. 서버로 아무것도 보내지 않습니다.
+        다른 기기로 옮기거나 백업할 때는 파일로 내보냅니다.
+      </span>
+      <span class="pm">필요 없음 · 브라우저 자료를 지우면 사라지니 백업하세요</span>
+    </button>
+
+    <button class="pick" data-preset="number">
+      <span class="pt">번호만 사용</span>
+      <span class="pd">
+        이름을 아예 넣지 않고 학번이나 번호로만 운영합니다.
+        개인정보 위험이 가장 낮습니다.
+      </span>
+      <span class="pm">필요 없음 · 예: 30101 또는 7번</span>
+    </button>
+
+    <p class="sub" style="margin:-8px 0 18px;">
+      처음이시면 <a href="#" data-intro-open="1" style="color:var(--ink-70);">소개를 먼저 보셔도</a> 됩니다.
+    </p>
+
+    <details class="fold" style="margin-top:18px;">
+      <summary>전에 내보낸 파일이 있어요</summary>
+      <div class="inner">
+        <p class="sub" style="margin:12px 0 8px;">파일을 고르면 그대로 이어서 씁니다.</p>
+        <input type="file" id="inRestore" accept=".json,.mca" style="border:1.5px dashed var(--line); padding:14px;">
+      </div>
+    </details>
+
+    <div class="appfoot" style="border:0;">
+      <a href="#" data-intro-open="1">소개</a><span class="sep">·</span><a href="#" data-legal="privacy">개인정보 처리방침</a><span class="sep">·</span><a href="#" data-legal="terms">이용약관</a>
+      <div class="jstd">Made by JSTD</div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================
+     학생 화면 (읽기 전용)
+     주소 뒤에 #/s/{반ID} 를 붙이면 이 화면으로 바로 들어옵니다.
+     ========================================================= -->
+<div id="screen-student" class="hidden">
+  <header class="stop">
+    <div class="wrap">
+      <h1 id="stTitle">우리 반</h1>
+      <span class="d" id="stDate"></span>
+    </div>
+  </header>
+
+  <!-- 비밀번호 잠금 -->
+  <div id="studentGate" class="hidden">
+    <div class="lock">🔒</div>
+    <h2>반 비밀번호</h2>
+    <p>선생님이 알려주신 번호를 넣어 주세요.</p>
+    <input type="text" id="inGate" inputmode="numeric" autocomplete="off" placeholder="○○○○">
+    <button class="btn primary" id="btnGate" style="width:100%;">들어가기</button>
+  </div>
+
+  <main class="wrap hidden" id="studentBody">
+    <div class="card" id="stCardTT">
+      <span class="eyebrow">오늘 시간표</span>
+      <h2 id="stTTHead">시간표</h2>
+      <div class="periods" id="stPeriods"></div>
+    </div>
+
+    <div class="card" id="stCardToday">
+      <span class="eyebrow">오늘 일정</span>
+      <h2>오늘 있는 일</h2>
+      <div class="items" id="stToday"></div>
+    </div>
+
+    <div class="card" id="stCardDday">
+      <span class="eyebrow">D-Day</span>
+      <h2>다가오는 일정</h2>
+      <div class="items" id="stDday"></div>
+    </div>
+
+    <div class="card" id="stCardMeal">
+      <span class="eyebrow">급식</span>
+      <h2>오늘 급식</h2>
+      <div id="stMeal"></div>
+    </div>
+
+    <div class="card" id="stCardSupply">
+      <span class="eyebrow">준비물</span>
+      <h2>챙겨올 것</h2>
+      <p id="stSupply" style="white-space:pre-wrap; margin:0; font-size:15px;"></p>
+    </div>
+
+    <div class="card" id="stCardNotice">
+      <span class="eyebrow">공지</span>
+      <h2>알립니다</h2>
+      <p id="stNotice" style="white-space:pre-wrap; margin:0; font-size:15px;"></p>
+    </div>
+
+    <div class="card" id="stCardDuty">
+      <span class="eyebrow">오늘 당번</span>
+      <h2>당번 · 청소</h2>
+      <div id="stDuty"></div>
+    </div>
+
+    <p class="foot" id="stFoot"></p>
+    <footer class="appfoot">
+      <a href="#" data-intro-open="1">소개</a><span class="sep">·</span><a href="#" data-legal="privacy">개인정보 처리방침</a><span class="sep">·</span><a href="#" data-legal="terms">이용약관</a>
+      <div class="jstd">Made by JSTD</div>
+    </footer>
+  </main>
+</div>
+
+<!-- =========================================================
+     로그인 화면
+     ========================================================= -->
+<div id="screen-login">
+  <div class="box">
+    <div class="mark">조 회 준 비</div>
+    <h1>Johoe</h1>
+    <p style="font-family:var(--font-mono); font-size:11.5px; letter-spacing:.18em; color:var(--ink-45); margin:0 0 16px;">아침 조회 도우미</p>
+    <p class="quote">조회 시간을 줄이면,<br>학생과 눈을 마주칠 시간이 늘어납니다.</p>
+    <button class="btn primary" id="btnGoogle">구글 계정으로 시작하기</button>
+    <button class="btn ghost" id="btnDemo">저장 없이 둘러보기</button>
+    <button class="btn ghost" id="btnBackSetup">사용 방식 다시 고르기</button>
+    <p class="footnote" style="border:0; padding-top:20px;">
+      학생 전화번호·주소·생년월일은 저장하지 않습니다.
+      학생 이름은 이 기기에서 암호로 잠근 뒤 저장됩니다.
+    </p>
+    <div class="appfoot" style="border:0; padding-top:0;">
+      <a href="#" data-intro-open="1">소개</a><span class="sep">·</span><a href="#" data-legal="privacy">개인정보 처리방침</a><span class="sep">·</span><a href="#" data-legal="terms">이용약관</a>
+      <div class="jstd">Made by JSTD</div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================
+     앱 본체
+     ========================================================= -->
+<div id="screen-app" class="hidden">
+
+  <div id="demoBanner" class="hidden">둘러보기 모드입니다. 새로고침하면 입력한 내용이 사라집니다.</div>
+
+  <header class="topbar">
+    <div class="wrap">
+      <h1 id="hdrTitle">관리</h1>
+      <span class="cls" id="hdrClass">3학년 1반</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- ─────────── 탭 1: 관리 ─────────── -->
+    <section id="tab-manage">
+
+      <!-- 사용 방식 -->
+      <div class="card">
+        <span class="eyebrow">사용 방식</span>
+        <h2>저장 위치와 이름</h2>
+        <div class="lockstate" id="modeState" data-s="open">
+          <span class="dot"></span><span id="modeTxt"></span>
+          <span class="sm2" id="modeSub"></span>
+        </div>
+
+        <label class="field">저장 위치</label>
+        <div class="toggles" id="bkToggles">
+          <label class="toggle" data-k="cloud">
+            <input type="radio" name="bk" value="cloud">
+            <span><span class="t">서버 동기화</span><br><span class="d">여러 기기에서 함께 씁니다. 결재와 동의서가 필요합니다</span></span>
+          </label>
+          <label class="toggle" data-k="local">
+            <input type="radio" name="bk" value="local">
+            <span><span class="t">이 기기에만</span><br><span class="d">서버로 보내지 않습니다. 파일로 백업하세요</span></span>
+          </label>
+        </div>
+
+        <label class="field">학생 이름</label>
+        <div class="toggles" id="nmToggles">
+          <label class="toggle" data-k="real">
+            <input type="radio" name="nm" value="real">
+            <span><span class="t">실명 사용</span><br><span class="d">암호로 잠근 뒤 저장합니다</span></span>
+          </label>
+          <label class="toggle" data-k="number">
+            <input type="radio" name="nm" value="number">
+            <span><span class="t">번호만 사용</span><br><span class="d">이름을 저장하지 않습니다</span></span>
+          </label>
+        </div>
+
+        <label class="field">백업</label>
+        <label class="field" style="display:flex; align-items:center; gap:10px; min-height:var(--tap); margin:0;">
+          <input type="checkbox" id="chkEncExport" checked style="width:22px; height:22px; accent-color:var(--ink);">
+          <span style="font-size:14.5px; color:var(--ink); font-weight:400;">파일에 암호를 걸어 내보내기</span>
+        </label>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn sm" id="btnExport">파일로 내보내기</button>
+          <button class="btn ghost sm" id="btnPickImport">파일 가져오기</button>
+        </div>
+        <input type="file" id="inImport" accept=".json,.mca" class="hidden">
+        <p class="sub" style="margin-top:8px;">
+          내보낸 파일에는 학생 이름과 출결 기록이 들어 있습니다. 아무 곳에나 두지 마세요.
+        </p>
+      </div>
+
+      <!-- 반 정보 -->
+      <div class="card">
+        <span class="eyebrow">반 정보</span>
+        <h2>우리 반</h2>
+        <label class="field" for="inClassName">반 이름</label>
+        <input type="text" id="inClassName" placeholder="예: 3학년 1반" autocomplete="off">
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn sm" id="btnSaveClassName">반 이름 저장</button>
+        </div>
+      </div>
+
+      <!-- 이름 보호 -->
+      <div class="card" id="cardLock">
+        <span class="eyebrow">개인정보</span>
+        <h2>학생 이름 보호</h2>
+        <p class="sub">이름은 이 기기에서 암호로 잠근 뒤 서버에 올립니다. 암호와 열쇠는 서버로 전송되지 않습니다.</p>
+
+        <div class="lockstate" id="lockState" data-s="none">
+          <span class="dot"></span><span id="lockTxt">암호가 설정되지 않았습니다</span>
+          <span class="sm2" id="lockSub"></span>
+        </div>
+
+        <!-- 암호 설정 -->
+        <div id="lockSetup" class="hidden">
+          <label class="field" for="inLockPw">이름 보호 암호</label>
+          <input type="password" id="inLockPw" autocomplete="new-password" placeholder="4자 이상" inputmode="text">
+          <label class="field" for="inLockPw2">한 번 더 입력</label>
+          <input type="password" id="inLockPw2" autocomplete="new-password">
+          <p class="sub" id="pwHint" style="margin:6px 0 0;">4자 이상이면 됩니다.</p>
+          <div class="notice">
+            암호를 잊으면 이름은 복구할 수 없습니다. 다만 가려진 이름(김○○)은 그대로 남아
+            출결·자리·시간표 기능은 계속 쓸 수 있습니다.
+          </div>
+          <div class="btn-row"><button class="btn primary" id="btnSetLock">암호 설정</button></div>
+        </div>
+
+        <!-- 잠금 해제 -->
+        <div id="lockOpen" class="hidden">
+          <label class="field" for="inUnlockPw">암호를 넣으면 실명이 보입니다</label>
+          <input type="password" id="inUnlockPw" autocomplete="current-password">
+          <label class="field" style="display:flex; align-items:center; gap:10px; min-height:var(--tap); margin-bottom:0;">
+            <input type="checkbox" id="chkRemember" style="width:22px; height:22px; accent-color:var(--ink);">
+            <span style="font-size:14.5px; color:var(--ink); font-weight:400;">이 기기에서 기억하기</span>
+          </label>
+          <p class="sub" style="margin:4px 0 0;">공용 컴퓨터에서는 체크하지 마세요.</p>
+          <div class="btn-row" style="margin-top:12px;"><button class="btn primary" id="btnUnlock">잠금 해제</button></div>
+        </div>
+
+        <!-- 해제된 상태 -->
+        <div id="lockDone" class="hidden">
+          <div class="btn-row">
+            <button class="btn sm" id="btnLock">다시 잠그기</button>
+            <button class="btn ghost sm" id="btnChangePw">암호 바꾸기</button>
+          </div>
+        </div>
+
+        <label class="field">가려졌을 때 표시 방식</label>
+        <div class="policy" id="policyBox">
+          <label class="opt" data-v="masked">
+            <input type="radio" name="policy" value="masked">
+            <span><span class="t">김○○</span><br><span class="d">성만 남깁니다</span></span>
+          </label>
+          <label class="opt" data-v="surname">
+            <input type="radio" name="policy" value="surname">
+            <span><span class="t">김(7)</span><br><span class="d">같은 성이 많을 때 구분하기 좋습니다</span></span>
+          </label>
+        </div>
+        <p class="sub" id="policyNote" style="margin-top:8px;"></p>
+      </div>
+
+      <!-- 학생 명단 -->
+      <div class="card">
+        <span class="eyebrow">명렬표</span>
+        <h2>학생 명단</h2>
+        <p class="sub">세 가지 방법 중 편한 것으로 넣으세요. 넣은 뒤 확인하고 저장합니다.</p>
+
+        <div class="notice hidden" id="rosterGate"></div>
+
+        <!-- 번호만 사용할 때 -->
+        <div id="numberEntry" class="hidden">
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <div style="flex:1;">
+              <label class="field" for="inMakeTo">몇 번까지 만들까요</label>
+              <input type="number" id="inMakeTo" min="1" max="60" inputmode="numeric" value="28">
+            </div>
+            <button class="btn primary" id="btnMakeNos" style="flex:none; margin-bottom:1px;">번호 만들기</button>
+          </div>
+          <label class="field" for="taSids">또는 학번을 붙여넣기 (한 줄에 하나)</label>
+          <textarea id="taSids" style="min-height:100px;" placeholder="30101&#10;30102&#10;30103"></textarea>
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn sm" id="btnParseSids">확인하기</button>
+          </div>
+        </div>
+
+        <div class="seg" role="tablist" id="rosterSeg">
+          <button role="tab" data-mode="manual" aria-selected="true">직접 입력</button>
+          <button role="tab" data-mode="paste"  aria-selected="false">엑셀에서 붙여넣기</button>
+          <button role="tab" data-mode="file"   aria-selected="false">명단 파일 가져오기</button>
+        </div>
+
+        <!-- 방식 1: 직접 입력 -->
+        <div id="mode-manual">
+          <p class="sub" style="margin-bottom:0;">번호는 자동으로 채워집니다. 이름을 쓰고 엔터를 누르면 다음 학생으로 넘어갑니다.</p>
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <div style="width:88px;">
+              <label class="field" for="inNo">번호</label>
+              <input type="number" id="inNo" inputmode="numeric" min="1">
+            </div>
+            <div style="flex:1;">
+              <label class="field" for="inName">이름</label>
+              <input type="text" id="inName" autocomplete="off" placeholder="예: 김정우">
+            </div>
+            <button class="btn primary" id="btnAddOne" style="flex:none;">추가</button>
+          </div>
+        </div>
+
+        <!-- 방식 2: 엑셀 붙여넣기 -->
+        <div id="mode-paste" class="hidden">
+          <p class="sub" style="margin-bottom:8px;">
+            엑셀에서 번호와 이름 칸을 복사한 뒤 아래에 붙여넣으세요. 이름만 붙여넣어도 됩니다.
+          </p>
+          <textarea id="taPaste" placeholder="1&#9;김정우&#10;2&#9;이인우&#10;3&#9;박찬우"></textarea>
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn" id="btnParsePaste">확인하기</button>
+          </div>
+        </div>
+
+        <!-- 방식 3: 파일 -->
+        <div id="mode-file" class="hidden">
+          <p class="sub" style="margin-bottom:8px;">
+            엑셀 파일이나 명단 표 파일을 고르세요. 번호와 이름 두 칸이면 충분합니다.
+          </p>
+          <input type="file" id="inFile" accept=".xlsx,.xls,.csv,.txt,.md" style="border:1.5px dashed var(--line); padding:14px;">
+        </div>
+
+        <!-- 가져오기 미리보기 -->
+        <div id="importPreview" class="hidden">
+          <div class="notice calm">
+            <b id="previewCount">0명</b>을 찾았습니다. 아래를 확인하고 저장하세요.
+          </div>
+          <div class="preview" id="previewBody"></div>
+          <div class="btn-row" style="margin-top:12px;">
+            <button class="btn primary" id="btnApplyImport">이대로 저장</button>
+            <button class="btn ghost" id="btnCancelImport">취소</button>
+          </div>
+        </div>
+
+        <!-- 현재 명단 -->
+        <div class="count-line">
+          <span>현재 명단</span><span id="rosterCount">0명</span>
+        </div>
+        <div class="roster" id="rosterList"></div>
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn danger sm" id="btnClearRoster">명단 전체 삭제</button>
+        </div>
+      </div>
+
+      <!-- 기본 시간표 -->
+      <div class="card">
+        <span class="eyebrow">시간표</span>
+        <h2>기본 시간표</h2>
+        <p class="sub">평소 시간표를 한 번만 넣어두면 조회 화면에 오늘 것만 뜹니다. 특정 날짜만 바뀔 때는 조회 화면에서 고치세요.</p>
+
+        <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:14px;">
+          <div style="width:120px;">
+            <label class="field" for="inPeriods">하루 교시 수</label>
+            <input type="number" id="inPeriods" min="1" max="10" inputmode="numeric">
+          </div>
+          <button class="btn sm" id="btnApplyPeriods" style="flex:none; margin-bottom:1px;">적용</button>
+        </div>
+
+        <div class="tt-edit" id="ttEdit"></div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn primary sm" id="btnSaveTT">시간표 저장</button>
+        </div>
+      </div>
+
+      <!-- 반복 일정 -->
+      <div class="card">
+        <span class="eyebrow">반복 일정</span>
+        <h2>매주 · 격주 · 매월 일정</h2>
+        <p class="sub">스포츠클럽, 동아리처럼 규칙적으로 돌아오는 일정을 넣어두세요.</p>
+
+        <label class="field" for="inRecTitle">일정 이름</label>
+        <input type="text" id="inRecTitle" placeholder="예: 스포츠클럽" autocomplete="off">
+
+        <div style="display:flex; gap:8px;">
+          <div style="flex:1.2;">
+            <label class="field" for="selRecFreq">반복</label>
+            <select id="selRecFreq">
+              <option value="weekly">매주</option>
+              <option value="biweekly">격주</option>
+              <option value="monthly">매월 N번째</option>
+            </select>
+          </div>
+          <div style="flex:1;" id="wrapRecNth" class="hidden">
+            <label class="field" for="selRecNth">몇 번째</label>
+            <select id="selRecNth">
+              <option value="1">첫째 주</option>
+              <option value="2">둘째 주</option>
+              <option value="3">셋째 주</option>
+              <option value="4">넷째 주</option>
+              <option value="5">다섯째 주</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label class="field" for="selRecDay">요일</label>
+            <select id="selRecDay">
+              <option value="1">월</option><option value="2">화</option>
+              <option value="3">수</option><option value="4">목</option>
+              <option value="5">금</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="wrapRecAnchor" class="hidden">
+          <label class="field" for="inRecAnchor">이 날짜가 들어 있는 주부터 시작</label>
+          <input type="date" id="inRecAnchor">
+        </div>
+
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn primary sm" id="btnAddRec">일정 추가</button>
+        </div>
+
+        <div class="items" id="recList" style="margin-top:14px;"></div>
+      </div>
+
+      <!-- D-Day -->
+      <div class="card">
+        <span class="eyebrow">D-Day</span>
+        <h2>다가오는 일정</h2>
+        <p class="sub">수행평가, 지필평가, 체험학습, 고입 일정을 넣으면 남은 날짜가 자동으로 계산됩니다.</p>
+
+        <label class="field" for="inDdTitle">일정 이름</label>
+        <input type="text" id="inDdTitle" placeholder="예: 국어 수행평가" autocomplete="off">
+
+        <div style="display:flex; gap:8px;">
+          <div style="flex:1;">
+            <label class="field" for="inDdDate">날짜</label>
+            <input type="date" id="inDdDate">
+          </div>
+          <div style="flex:1;">
+            <label class="field" for="selDdCat">종류</label>
+            <select id="selDdCat">
+              <option>수행평가</option><option>지필평가</option>
+              <option>체험학습</option><option>학교 행사</option>
+              <option>고입 일정</option><option>기타</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn primary sm" id="btnAddDd">일정 추가</button>
+        </div>
+
+        <div class="items" id="ddList" style="margin-top:14px;"></div>
+      </div>
+
+      <!-- 당번 -->
+      <div class="card">
+        <span class="eyebrow">당번</span>
+        <h2>당번 자동 순환</h2>
+        <p class="sub">주말은 건너뜁니다. 학기 초에 뽑아둔 학생들만 돌리거나, 전체 번호순으로 돌릴 수 있습니다.</p>
+
+        <label class="field" style="display:flex; align-items:center; gap:10px; min-height:var(--tap);">
+          <input type="checkbox" id="chkDuty" style="width:22px; height:22px; accent-color:var(--ink);">
+          <span style="font-size:15px; color:var(--ink); font-weight:400;">당번 순환 사용하기</span>
+        </label>
+
+        <div id="dutyOpts" class="hidden">
+          <label class="field" for="inDutyStart">순환을 시작한 날</label>
+          <input type="date" id="inDutyStart">
+          <p class="sub" style="margin:6px 0 0;">보통 학기 첫 등교일로 맞춥니다. 이 날이 첫 번째 순번입니다.</p>
+
+          <label class="field">당번 종류</label>
+          <div id="dutyGroups"></div>
+
+          <details class="fold" style="margin-top:12px;">
+            <summary>당번 종류 추가하기</summary>
+            <div class="inner">
+              <label class="field" for="inGName">이름</label>
+              <input type="text" id="inGName" placeholder="예: 칠판, 급식, 우유" autocomplete="off">
+              <div style="display:flex; gap:8px;">
+                <div style="flex:1.4;">
+                  <label class="field" for="selGMode">대상</label>
+                  <select id="selGMode">
+                    <option value="members">뽑아둔 학생들만</option>
+                    <option value="all">전체 번호순</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label class="field" for="inGPer">하루 인원</label>
+                  <input type="number" id="inGPer" min="1" max="10" value="1" inputmode="numeric">
+                </div>
+              </div>
+              <div class="btn-row" style="margin-top:12px;">
+                <button class="btn primary sm" id="btnAddGroup">추가</button>
+              </div>
+            </div>
+          </details>
+
+          <label class="field">이번 주 배정 미리보기</label>
+          <div id="dutyPreview"></div>
+        </div>
+      </div>
+
+      <!-- 급식 설정 -->
+      <div class="card">
+        <span class="eyebrow">급식</span>
+        <h2>학교 급식 불러오기</h2>
+        <p class="sub">학교를 한 번만 고르면 매일 급식이 저절로 뜹니다. 나이스 교육정보 개방 포털의 공개 자료를 씁니다.</p>
+
+        <div id="schoolNow" class="hidden">
+          <div class="schoolnow">
+            <b id="schoolNowName">—</b>
+            <button class="btn ghost sm" id="btnSchoolClear">바꾸기</button>
+          </div>
+        </div>
+
+        <div id="schoolFind">
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <div style="flex:1;">
+              <label class="field" for="inSchool" style="margin-top:0;">학교 이름</label>
+              <input type="text" id="inSchool" placeholder="예: 주곡중학교" autocomplete="off">
+            </div>
+            <button class="btn primary" id="btnSchoolFind" style="flex:none;">찾기</button>
+          </div>
+          <div class="schoolpick" id="schoolList"></div>
+        </div>
+      </div>
+
+      <!-- 학생 화면 공개 설정 -->
+      <div class="card">
+        <span class="eyebrow">학생 화면</span>
+        <h2>학생에게 보여줄 것</h2>
+        <p class="sub">켠 항목만 학생 화면에 올라갑니다. 끄면 학생 쪽에서 사라집니다.</p>
+
+        <div class="toggles" id="pubToggles">
+          <label class="toggle" data-k="timetable">
+            <input type="checkbox" data-pub="timetable">
+            <span><span class="t">오늘 시간표</span><br><span class="d">변경된 교시도 함께 보입니다</span></span>
+          </label>
+          <label class="toggle" data-k="schedule">
+            <input type="checkbox" data-pub="schedule">
+            <span><span class="t">오늘 일정</span><br><span class="d">스포츠클럽, 동아리 같은 반복 일정</span></span>
+          </label>
+          <label class="toggle" data-k="dday">
+            <input type="checkbox" data-pub="dday">
+            <span><span class="t">D-Day</span><br><span class="d">수행평가, 지필평가, 고입 일정</span></span>
+          </label>
+          <label class="toggle" data-k="supplies">
+            <input type="checkbox" data-pub="supplies">
+            <span><span class="t">준비물</span><br><span class="d">조회 화면에서 적은 준비물</span></span>
+          </label>
+          <label class="toggle" data-k="notice">
+            <input type="checkbox" data-pub="notice">
+            <span><span class="t">공지</span><br><span class="d">계속 붙여둔 공지만. 오늘 메모는 올라가지 않습니다</span></span>
+          </label>
+          <label class="toggle" data-k="meal">
+            <input type="checkbox" data-pub="meal">
+            <span><span class="t">오늘 급식</span><br><span class="d">학교를 골라두면 학생 화면에도 뜹니다</span></span>
+          </label>
+          <label class="toggle" data-k="duty">
+            <input type="checkbox" data-pub="duty">
+            <span><span class="t">오늘 당번</span><br><span class="d">이름 없이 번호로만 보입니다</span></span>
+          </label>
+        </div>
+
+        <div class="never">
+          <b>어떤 설정을 해도 학생 화면에 올라가지 않는 것</b><br>
+          학생 이름 · 출석번호와 이름의 연결 · 자리 배치 · 출결 기록 · 오늘 메모.
+          학생 화면은 이 정보가 들어 있지 않은 별도의 문서만 읽습니다.
+        </div>
+
+        <label class="field" for="inPw">반 비밀번호</label>
+        <input type="text" id="inPw" inputmode="numeric" autocomplete="off" placeholder="비우면 누구나 볼 수 있습니다">
+        <p class="sub" style="margin-top:6px;">
+          같은 학교 다른 반 학생이 실수로 들어오는 것을 막는 정도의 장치입니다.
+          비밀번호로 개인정보가 보호되지는 않으니, 민감한 내용은 올리지 마세요.
+        </p>
+
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn primary" id="btnSyncPublic">학생 화면에 반영</button>
+          <button class="btn sm" id="btnPreview">미리보기</button>
+          <button class="btn danger sm" id="btnUnpublish">학생 화면 내리기</button>
+        </div>
+
+        <div class="syncline" id="syncLine"><span class="dot"></span><span id="syncTxt">아직 반영하지 않았습니다</span></div>
+
+        <div class="notice hidden" id="pubLocalNote">
+          이 기기에만 저장하는 방식에서는 학생 화면을 올릴 수 없습니다.
+          「미리보기」로 내용은 확인하실 수 있고, 학생 화면이 필요하시면
+          Firebase 설정 후 서버 동기화로 바꿔 주세요.
+        </div>
+
+        <div class="linkbox">
+          <code id="pubLink">—</code>
+          <button class="btn sm" id="btnCopyLink">복사</button>
+        </div>
+        <div id="qrBox"></div>
+      </div>
+
+      <!-- 학년도 정리 -->
+      <div class="card">
+        <span class="eyebrow">정리</span>
+        <h2>학년도 데이터 초기화</h2>
+        <p class="sub">새 학년이 시작될 때 사용하세요. 되돌릴 수 없습니다.</p>
+        <div class="btn-row">
+          <button class="btn danger sm" id="btnResetYear">모두 지우고 새로 시작</button>
+        </div>
+      </div>
+
+      <p class="footnote">
+        이 앱의 출결 기록은 공식 학적 자료가 아닙니다.
+        공식 처리는 학교 학적 시스템에서 진행해 주세요.
+      </p>
+    </section>
+
+    <!-- ─────────── 탭 2: 자리 배치 ─────────── -->
+    <section id="tab-seat" class="hidden">
+      <div class="card">
+        <span class="eyebrow">교실</span>
+        <h2>자리 배치</h2>
+        <p class="sub">오른쪽에서 학생을 고른 뒤, 앉힐 자리를 누르세요. 칠판은 화면 아래쪽입니다.</p>
+
+        <div style="display:flex; gap:8px; align-items:flex-end;">
+          <div style="flex:1;">
+            <label class="field" for="inRows">줄 수(앞뒤)</label>
+            <input type="number" id="inRows" min="1" max="10" inputmode="numeric">
+          </div>
+          <div style="flex:1;">
+            <label class="field" for="inCols">칸 수(좌우)</label>
+            <input type="number" id="inCols" min="1" max="10" inputmode="numeric">
+          </div>
+          <button class="btn sm" id="btnApplyGrid" style="flex:none; margin-bottom:1px;">적용</button>
+        </div>
+
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn sm" id="btnAutoSeat">번호순으로 앉히기</button>
+          <button class="btn ghost sm" id="btnResetSeat">자리 비우기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="seatwrap">
+          <div class="seatmain">
+            <div class="grid" id="seatGrid"></div>
+            <div class="board">칠 판</div>
+          </div>
+          <aside class="traycol">
+            <div class="tlabel">앉힐 학생</div>
+            <div class="tlist" id="trayList"></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────── 탭 3: 조회 (Stage 2) ─────────── -->
+    <section id="tab-home" class="hidden">
+
+      <div class="datehead">
+        <div class="ymd" id="dashYmd"></div>
+        <div class="big" id="dashBig"></div>
+        <div class="sum" id="dashSum"></div>
+      </div>
+
+      <!-- 오늘 시간표 -->
+      <div class="card">
+        <span class="eyebrow">오늘 시간표</span>
+        <h2 id="ttHead">시간표</h2>
+        <div class="periods" id="dashPeriods"></div>
+        <details class="fold" id="ttOverride">
+          <summary>오늘만 시간표 고치기</summary>
+          <div class="inner">
+            <p class="sub" style="margin:12px 0 8px;">오늘 하루만 바뀝니다. 기본 시간표는 그대로입니다.</p>
+            <div class="periods" id="ovEdit"></div>
+            <div class="btn-row" style="margin-top:12px;">
+              <button class="btn primary sm" id="btnSaveOv">오늘 시간표 저장</button>
+              <button class="btn ghost sm" id="btnClearOv">기본 시간표로 되돌리기</button>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- 조회 체크리스트 -->
+      <div class="card">
+        <span class="eyebrow">체크리스트</span>
+        <h2>오늘 말할 것</h2>
+        <div class="ck" id="ckList"></div>
+        <div class="ckbar" id="ckBar"><span class="track"><span class="fill" id="ckFill"></span></span><span id="ckCount">0/0</span></div>
+        <div style="display:flex; gap:8px; align-items:flex-end; margin-top:12px;">
+          <div style="flex:1;">
+            <label class="field" for="inCkNew" style="margin-top:0;">항목 추가</label>
+            <input type="text" id="inCkNew" placeholder="예: 실내화 확인" autocomplete="off">
+          </div>
+          <button class="btn primary" id="btnCkAdd" style="flex:none;">추가</button>
+        </div>
+        <label class="field" style="display:flex; align-items:center; gap:10px; min-height:var(--tap); margin-bottom:0;">
+          <input type="checkbox" id="chkCkPin" style="width:22px; height:22px; accent-color:var(--ink);">
+          <span style="font-size:14px; color:var(--ink); font-weight:400;">매일 반복되는 항목으로 넣기</span>
+        </label>
+        <p class="sub" style="margin:4px 0 0;">반복 항목은 매일 아침 저절로 다시 올라옵니다. 그 외에는 오늘만 남습니다.</p>
+      </div>
+
+      <!-- 급식 -->
+      <div class="card" id="cardMeal">
+        <span class="eyebrow">급식</span>
+        <h2>오늘 급식</h2>
+        <div id="mealBody"></div>
+      </div>
+
+      <!-- 오늘 일정 -->
+      <div class="card">
+        <span class="eyebrow">오늘 일정</span>
+        <h2>오늘 있는 일</h2>
+        <div class="items" id="dashToday"></div>
+      </div>
+
+      <!-- D-Day -->
+      <div class="card">
+        <span class="eyebrow">D-Day</span>
+        <h2>다가오는 일정</h2>
+        <div class="items" id="dashDday"></div>
+      </div>
+
+      <!-- 당번 -->
+      <div class="card" id="cardDuty">
+        <span class="eyebrow">오늘 당번</span>
+        <h2>당번 · 청소</h2>
+        <div id="dashDuty"></div>
+      </div>
+
+      <!-- 공지와 메모 -->
+      <div class="card">
+        <span class="eyebrow">전달 사항</span>
+        <h2>공지와 메모</h2>
+        <label class="field" for="taNotice">계속 붙여둘 공지</label>
+        <textarea id="taNotice" style="min-height:80px;" placeholder="예: 이번 주 실내화 지참"></textarea>
+        <label class="field" for="taSupply">준비물</label>
+        <textarea id="taSupply" style="min-height:70px;" placeholder="예: 실내화, 미술 준비물"></textarea>
+        <label class="field" for="taMemo">오늘 메모 <span style="font-weight:400; color:var(--ink-45);">(학생에게 보이지 않음)</span></label>
+        <textarea id="taMemo" style="min-height:80px;" placeholder="오늘 조회에서 말할 것"></textarea>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn primary sm" id="btnSaveNotes">저장</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────── 탭 4: 출석 (Stage 2) ─────────── -->
+    <section id="tab-attend" class="hidden">
+
+      <div class="card">
+        <span class="eyebrow">출석부</span>
+        <h2 id="attHead">출석 체크</h2>
+        <p class="sub">모두 출석으로 시작합니다. 안 온 학생만 누르세요. 누를 때마다 출석 → 지각 → 결석 순으로 바뀝니다.</p>
+        <div class="tally">
+          <div class="a"><span class="n" id="tallyOk">0</span><span class="l">출석</span></div>
+          <div class="b"><span class="n" id="tallyAb">0</span><span class="l">결석</span></div>
+          <div class="c"><span class="n" id="tallyLt">0</span><span class="l">지각</span></div>
+        </div>
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn primary" id="btnCloseMeeting">조회 마치기</button>
+          <button class="btn ghost sm" id="btnReopen">다시 열기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="grid" id="attGrid"></div>
+        <div class="board">칠 판</div>
+        <p class="sub" id="attNoSeat" style="margin-top:14px;"></p>
+      </div>
+
+      <!-- 조회 종료 후 확인 필요 -->
+      <div class="card hidden" id="cardFollow">
+        <span class="eyebrow">확인 필요</span>
+        <h2>연락이 필요한 학생</h2>
+        <div class="notice">
+          아직 등교하지 않은 학생입니다. 앱은 미인정 결석으로 처리하지 않습니다.
+          확인 후 학교 절차에 따라 처리해 주세요.
+        </div>
+        <div class="items" id="followList"></div>
+        <div class="copybox" id="copyText"></div>
+        <div class="btn-row">
+          <button class="btn sm" id="btnCopyMsg">문구 복사</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="appfoot">
+    <a href="#" data-intro-open="1">소개</a><span class="sep">·</span><a href="#" data-legal="privacy">개인정보 처리방침</a><span class="sep">·</span><a href="#" data-legal="terms">이용약관</a>
+    <div class="jstd">Made by JSTD</div>
+  </footer>
+
+  <!-- 하단 탭바 -->
+  <nav class="tabbar">
+    <button data-tab="manage" aria-selected="true"><span class="ic">📋</span>관리</button>
+    <button data-tab="seat"   aria-selected="false"><span class="ic">🪑</span>자리 배치</button>
+    <button data-tab="home"   aria-selected="false"><span class="ic">🌅</span>조회</button>
+    <button data-tab="attend" aria-selected="false"><span class="ic">✅</span>출석</button>
+  </nav>
+</div>
+
+<div id="toast"></div>
+
+<!-- =========================================================
+     개인정보 처리방침 / 이용약관
+     ========================================================= -->
+<div id="legalLayer" class="hidden">
+  <div class="bar"><span id="legalTitle">개인정보 처리방침</span><button id="btnCloseLegal">닫기</button></div>
+
+  <!-- 개인정보 처리방침 -->
+  <div class="doc hidden" id="docPrivacy">
+    <p class="rev">최종 개정일 2026. 7. 30. · 시행일 2026. 7. 30.</p>
+
+    <div class="warn">
+      이 앱은 개인이 만들어 무료로 제공하는 학급 운영 보조 도구입니다.
+      학교의 공식 학적·출결 시스템이 아닙니다. 학생 정보를 입력하기 전에
+      소속 학교의 개인정보 보호 담당자와 사용 가능 여부를 확인해 주세요.
+    </div>
+
+    <h3>1. 처리하는 정보</h3>
+    <table>
+      <tr><th>구분</th><th>항목</th><th>수집 방법</th></tr>
+      <tr><td>교사</td><td>구글 계정 식별자, 이메일 주소</td><td>구글 로그인 시 자동</td></tr>
+      <tr><td>학생</td><td>출석번호, 이름(암호화 저장), 자리 위치, 출결 기록</td><td>교사가 직접 입력</td></tr>
+      <tr><td>학급</td><td>반 이름, 시간표, 일정, 공지, 준비물, 교사 메모</td><td>교사가 직접 입력</td></tr>
+    </table>
+
+    <h3>2. 처리하지 않는 정보</h3>
+    <p>다음 정보는 입력란 자체를 제공하지 않으며 어떤 경우에도 저장하지 않습니다.</p>
+    <ul>
+      <li>학생 및 보호자의 전화번호, 주소, 이메일</li>
+      <li>주민등록번호, 생년월일, 학번</li>
+      <li>성적, 상담 내용, 건강 정보 등 민감정보</li>
+      <li>사진, 음성, 영상</li>
+    </ul>
+
+    <h3>3. 이름의 암호화</h3>
+    <p>학생 이름은 교사가 정한 암호로 만든 열쇠를 이용해 <b>교사의 브라우저 안에서</b> 암호화(AES-256-GCM)된 뒤 서버로 전송됩니다. 암호와 열쇠는 서버로 전송되지 않고 서버에 저장되지도 않습니다. 서버에는 암호화된 문자열과, 기능 유지를 위한 가려진 이름(예: 김○○)만 남습니다.</p>
+    <p>암호를 잊은 경우 이름은 복구할 수 없습니다. 이는 설계상 의도된 것입니다.</p>
+    <p><b>한계에 대한 안내:</b> 이름을 암호화하더라도 출석번호와 출결 기록은 알아볼 수 있는 형태로 저장됩니다. 따라서 이 앱의 저장 방식은 완전한 익명처리가 아니라 <b>가명처리</b>에 해당합니다.</p>
+
+    <h3>3-1. 사용 방식에 따른 차이</h3>
+    <p>이 앱은 세 가지 방식 중 하나로 사용할 수 있고, 방식에 따라 서버로 전송되는 정보가 달라집니다.</p>
+    <table>
+      <tr><th>방식</th><th>서버로 전송되는 정보</th></tr>
+      <tr><td>학교 승인 후 동기화</td><td>출석번호, 암호화된 이름, 가려진 이름, 출결 기록, 학급 운영 정보</td></tr>
+      <tr><td>내 기기에서만</td><td><b>없음.</b> 모든 정보가 교사의 브라우저에만 저장되며, 백업은 교사가 파일로 관리합니다.</td></tr>
+      <tr><td>번호만 사용</td><td>이름을 수집하지 않습니다. 출석번호 또는 학번과 출결 기록만 처리합니다.</td></tr>
+    </table>
+    <p>「내 기기에서만」 방식에서는 학생 열람용 화면을 제공하지 않습니다. 「번호만 사용」 방식에서도 출석번호와 출결 기록의 결합은 학교 내에서 특정 개인을 알아볼 수 있으므로 여전히 개인정보에 해당하며, 다만 위험 수준이 낮아집니다.</p>
+
+    <h3>4. 처리 목적</h3>
+    <ul>
+      <li>학급 조회 업무 지원(출석 확인, 시간표·일정 안내, 당번 순환)</li>
+      <li>학생에게 공개하도록 설정한 정보의 열람 제공</li>
+    </ul>
+    <p>목적 외 이용, 광고, 분석, 이용자 행태 추적은 하지 않습니다.</p>
+
+    <h3>5. 보관 장소와 처리 위탁</h3>
+    <p>정보는 Google LLC가 제공하는 Firebase(Cloud Firestore)에 저장됩니다. 저장 및 인증 기능 제공 범위에서 처리가 위탁되며, 그 외 제3자에게 정보를 제공하거나 판매하지 않습니다. Google의 데이터 처리 방침은 Google의 정책을 따릅니다.</p>
+
+    <h3>6. 보유 기간과 파기</h3>
+    <ul>
+      <li>출결 기록은 학년도 단위로 보관합니다.</li>
+      <li>관리 화면의 「학년도 데이터 초기화」로 교사가 직접 전부 삭제할 수 있습니다.</li>
+      <li>앱이 자동으로 삭제하는 기능은 없습니다. 삭제 시점은 항상 교사가 정합니다.</li>
+      <li>학생 화면을 내리면 학생 열람용 사본이 즉시 삭제됩니다.</li>
+    </ul>
+
+    <h3>7. 학생에게 공개되는 정보</h3>
+    <p>학생 열람용 화면은 교사용 정보와 <b>물리적으로 분리된 별도의 문서</b>만 읽습니다. 이 문서에는 다음이 들어가지 않습니다.</p>
+    <ul>
+      <li>학생 이름 및 이름과 번호의 연결 정보</li>
+      <li>자리 배치</li>
+      <li>출결 기록</li>
+      <li>교사 메모</li>
+    </ul>
+    <p>당번 안내는 이름 없이 출석번호로만 표시됩니다. 반 비밀번호는 다른 반 학생의 실수 접근을 줄이기 위한 편의 장치이며, 개인정보 보호 수단이 아닙니다.</p>
+
+    <h3>8. 정보주체의 권리</h3>
+    <p>학생과 보호자는 담임교사를 통해 저장된 정보의 열람, 수정, 삭제를 요청할 수 있습니다. 교사는 관리 화면에서 즉시 처리할 수 있습니다.</p>
+
+    <h3>9. 책임의 범위</h3>
+    <p>이 앱을 학급에 사용하기로 결정하고 학생 정보를 입력하는 주체는 교사입니다. 학교의 개인정보 처리 방침 준수, 필요한 경우의 사전 승인과 보호자 안내는 교사의 책임입니다. 제작자는 앱의 기능을 제공하며, 입력된 정보의 내용에 관여하지 않습니다.</p>
+
+    <h3>10. 문의</h3>
+    <p>앱 기능 및 개인정보 처리에 관한 문의는 제작자(JSTD)에게 연락해 주세요. 학생 정보에 관한 개별 요청은 담임교사에게 문의해 주세요.</p>
+  </div>
+
+  <!-- 이용약관 -->
+  <div class="doc hidden" id="docTerms">
+    <p class="rev">최종 개정일 2026. 7. 30. · 시행일 2026. 7. 30.</p>
+
+    <h3>제1조 (목적)</h3>
+    <p>이 약관은 제작자(JSTD)가 무료로 제공하는 학급 운영 보조 도구 「Johoe」(이하 "서비스")의 이용 조건과 이용자·제작자의 권리와 책임을 정하는 것을 목적으로 합니다.</p>
+
+    <h3>제2조 (서비스의 성격)</h3>
+    <ul>
+      <li>서비스는 개인이 제작해 무료로 제공하는 도구이며, 학교나 교육청의 공식 시스템이 아닙니다.</li>
+      <li>서비스가 기록하는 출결 정보는 <b>공식 학적 자료가 아닙니다.</b> 공식 출결 처리는 학교의 학적 시스템에서 진행해야 합니다.</li>
+      <li>서비스는 결석에 대한 어떠한 자동 판정도 하지 않습니다. 미인정 결석 등의 판단은 전적으로 교사와 학교의 절차에 따릅니다.</li>
+    </ul>
+
+    <h3>제3조 (이용자의 자격과 의무)</h3>
+    <ul>
+      <li>교사용 기능은 구글 계정으로 로그인한 교사가 이용합니다.</li>
+      <li>이용자는 학생 정보를 입력하기 전에 소속 학교의 개인정보 처리 방침을 확인하고 필요한 절차를 이행해야 합니다.</li>
+      <li>이용자는 전화번호, 주민등록번호, 성적, 건강 정보, 상담 내용 등 민감정보를 어떤 입력란에도 입력하지 않아야 합니다.</li>
+      <li>이용자는 학생 열람용 화면에 개인을 식별할 수 있는 내용을 올리지 않아야 합니다.</li>
+      <li>반 비밀번호는 보안 수단이 아니라 편의 장치임을 이해하고 사용해야 합니다.</li>
+    </ul>
+
+    <h3>제4조 (이름 보호 암호)</h3>
+    <ul>
+      <li>학생 이름을 암호화하는 암호는 이용자가 정하고 이용자가 보관합니다.</li>
+      <li>제작자는 이 암호를 알 수 없으며, 분실 시 이름을 복구해 드릴 수 없습니다.</li>
+      <li>「이 기기에서 기억하기」를 선택하면 열쇠가 해당 기기에 저장됩니다. 공용 기기에서는 사용하지 않아야 하며, 이로 인한 결과는 이용자의 책임입니다.</li>
+    </ul>
+
+    <h3>제5조 (데이터의 보관과 백업)</h3>
+    <ul>
+      <li>데이터는 Google Firebase에 저장되며, 서비스는 별도의 자동 백업을 제공하지 않습니다.</li>
+      <li>중요한 기록은 이용자가 별도로 보관해야 합니다.</li>
+      <li>「학년도 데이터 초기화」와 「명단 전체 삭제」는 되돌릴 수 없습니다.</li>
+      <li>내보낸 백업 파일에는 학생 정보와 출결 기록이 포함됩니다. 파일의 보관과 폐기는 이용자의 책임이며, 암호를 걸어 내보내는 것을 권장합니다.</li>
+      <li>「내 기기에서만」 방식은 브라우저 저장 공간을 사용하므로, 브라우저 자료 삭제나 기기 초기화로 자료가 사라질 수 있습니다.</li>
+    </ul>
+
+    <h3>제6조 (서비스의 변경 및 중단)</h3>
+    <p>제작자는 기능을 추가·변경·중단할 수 있으며, 무료로 제공되는 서비스의 특성상 사전 통지 없이 이루어질 수 있습니다. 외부 서비스(Google Firebase 등)의 정책 변경이나 장애로 서비스가 중단될 수 있습니다.</p>
+
+    <h3>제7조 (면책)</h3>
+    <ul>
+      <li>제작자는 무상으로 제공되는 서비스의 완전성, 무결성, 특정 목적 적합성을 보증하지 않습니다.</li>
+      <li>서비스 이용 또는 이용 불능으로 발생한 손해, 데이터 손실, 출결 기록의 오류에 대해 제작자는 책임을 지지 않습니다.</li>
+      <li>다만 제작자의 고의 또는 중대한 과실이 있는 경우에는 그러하지 않습니다.</li>
+      <li>이용자가 학교의 규정이나 관계 법령을 위반해 발생한 문제는 이용자의 책임입니다.</li>
+    </ul>
+
+    <h3>제8조 (지식재산권)</h3>
+    <p>서비스의 코드와 화면 구성에 대한 권리는 제작자에게 있습니다. 이용자가 입력한 학급 데이터에 대한 권리는 이용자와 학교에 있으며, 제작자는 이를 열람하거나 다른 목적으로 이용하지 않습니다.</p>
+
+    <h3>제9조 (약관의 변경)</h3>
+    <p>약관이 변경되면 이 화면에 개정일과 함께 게시합니다. 변경 후 서비스를 계속 이용하면 변경된 약관에 동의한 것으로 봅니다.</p>
+
+    <h3>제10조 (준거법)</h3>
+    <p>이 약관은 대한민국 법령에 따라 해석되고 적용됩니다.</p>
+  </div>
+</div>
+
+<!-- 학생 화면 미리보기 겹침 -->
+<div id="previewLayer" class="hidden">
+  <div class="bar">
+    <span>학생에게 이렇게 보입니다</span>
+    <button id="btnClosePreview">닫기</button>
+  </div>
+  <div id="previewMount"></div>
+</div>
+
+<script>
+/* ============================================================
+   0. 설정 — 바꿀 값은 전부 여기에 모읍니다
+   ============================================================ */
+const CONFIG = {
+  // Firebase 콘솔 > 프로젝트 설정 > 내 앱 에서 복사해 붙여넣으세요.
+  // 비워두면 '둘러보기(데모)' 모드로만 동작합니다.
+  firebase: {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  },
+  appName: "Johoe",
+  defaultClassName: "3학년 1반",
+  nameMaskingDefault: "masked",   // masked | surname | full
+  seat: { rows: 5, cols: 6 },
+  periodsPerDay: 7,               // 하루 교시 수 기본값
+  debug: false
+};
+
+/* Firebase SDK 버전 (CDN 동적 로딩) */
+const FB_VER = "10.12.2";
+
+/* ============================================================
+   1. 앱 상태
+   ============================================================ */
+const state = {
+  /* ★ 사용 방식은 서로 독립된 두 개의 스위치다.
+       화면에는 프리셋 3개로 보여주지만 내부는 이 둘로만 갈린다. */
+  mode: "local",       // "cloud" | "local" | "demo"  — 저장 위치
+  nameMode: "real",    // "real" | "number"           — 이름 사용 여부
+  uid: null,
+  classId: null,
+  data: null,          // classes/{classId} 문서 내용
+  pickedStudent: null, // 자리 배치에서 현재 집어든 학생 id
+  pendingImport: null, // 저장 대기 중인 가져오기 결과
+  tab: "manage",
+  attCache: {},        // { "2026-03-02": 출결문서 }
+  attDate: null,       // 지금 보고 있는 출결 날짜
+  publicCache: null,   // 둘러보기 모드에서 쓰는 학생 화면 문서
+  names: {}            // { s01: "김정우" } 잠금 해제 중에만 메모리에 존재. 저장하지 않음
+};
+
+/* 빈 반 문서 기본값 */
+function emptyClassDoc(uid){
+  return {
+    ownerUid: uid,
+    className: CONFIG.defaultClassName,
+    schoolYear: new Date().getFullYear(),
+    nameMasking: CONFIG.nameMaskingDefault,   // masked | surname (가려졌을 때 모양)
+    nameSalt: null,               // 암호에서 열쇠를 만들 때 쓰는 소금값 (비밀 아님)
+    nameVerify: null,             // 암호가 맞는지 확인하는 검증값
+    students: [],                 // { id, no, name, displayName }
+    seats: {},                    // "r0c0": "s01"
+    grid: { rows: CONFIG.seat.rows, cols: CONFIG.seat.cols },
+    periods: CONFIG.periodsPerDay,
+    timetable: {},                // { mon:["국어","수학",...], tue:[...] }
+    overrides: {},                // { "2026-03-02": ["국어","자습",...] } 그날만 바뀐 시간표
+    recurring: [],                // { id, title, freq, day, nth, anchor, skips:[] }
+    ddays: [],                    // { id, title, date, cat }
+    /* 당번은 종류별로 따로 돈다.
+       mode "members" = 학기 초에 뽑아둔 학생들만 순환 (예: 칠판 5명이 월~금)
+       mode "all"     = 전체 명단 번호순 순환                                  */
+    duty: {
+      enabled: false, start: null,
+      groups: [
+        { id:"g1", name:"당번", mode:"all", per:2, members:[] },
+        { id:"g2", name:"청소", mode:"all", per:4, members:[] }
+      ]
+    },
+    checklist: [],                // 매일 반복되는 체크 항목 { id, text }
+    checkDaily: {},               // { "2026-03-02": { items:[{id,text}], done:{id:true} } }
+    school: null,                 // { code, office, name } 급식 불러올 학교
+    notice: "",                   // 계속 붙여두는 공지
+    supplies: "",                 // 준비물
+    memos: {},                    // { "2026-03-02": "오늘 메모" } — 학생에게 공개하지 않음
+    publicSettings: {             // 학생 화면에 올릴 항목
+      timetable: true, schedule: true, dday: true,
+      supplies: true, notice: true, duty: false, meal: true
+    },
+    passwordHash: null,           // 반 비밀번호 (SHA-256)
+    published: false,             // 학생 화면 공개 여부
+    publishedAt: null
+  };
+}
+
+/* ============================================================
+   2. 저장소 계층
+   ------------------------------------------------------------
+   화면 코드는 store.save(경로, 값) 만 호출합니다.
+   Firestore든 메모리든 이 아래에서만 갈립니다.
+
+   ★ 중요: Firestore 쓰기는 반드시 필드 단위 merge 로 처리합니다.
+     문서 전체를 덮어쓰면 교사가 PC와 태블릿을 함께 열어둔 상황에서
+     나중 쓰기가 앞의 기록을 지워버립니다(last-write-wins).
+   ============================================================ */
+/* ------------------------------------------------------------
+   기기 저장소
+   브라우저 저장을 못 쓰는 환경(미리보기 등)에서는 메모리로 대체한다.
+   ------------------------------------------------------------ */
+const memStore = {};
+const LS = {
+  get(k){
+    try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }
+    catch(e){ return memStore[k] ?? null; }
+  },
+  set(k, v){
+    try{ localStorage.setItem(k, JSON.stringify(v)); }
+    catch(e){ memStore[k] = v; }
+  },
+  del(k){
+    try{ localStorage.removeItem(k); }catch(e){}
+    delete memStore[k];
+  }
+};
+const K_SETUP = "mca_setup";      // { mode, nameMode }
+const K_CLASS = "mca_class";      // 반 문서
+const K_ATT   = "mca_att_";       // + 날짜
+
+const store = (() => {
+  let fb = null;   // { db, doc, setDoc, getDoc, deleteField }
+
+  /* "a.b.c" 형태의 경로를 중첩 객체로 바꿉니다 */
+  function nest(path, value){
+    const parts = path.split(".");
+    const root = {};
+    let cur = root;
+    parts.forEach((p, i) => {
+      if(i === parts.length - 1) cur[p] = value;
+      else { cur[p] = {}; cur = cur[p]; }
+    });
+    return root;
+  }
+
+  /* 로컬 state.data 에도 동일하게 반영 */
+  function applyLocal(path, value){
+    const parts = path.split(".");
+    let cur = state.data;
+    for(let i = 0; i < parts.length - 1; i++){
+      if(typeof cur[parts[i]] !== "object" || cur[parts[i]] === null) cur[parts[i]] = {};
+      cur = cur[parts[i]];
+    }
+    const last = parts[parts.length - 1];
+    if(value === null) delete cur[last];
+    else cur[last] = value;
+  }
+
+  return {
+    setFirebase(o){ fb = o; },
+
+    /* 필드 하나(또는 하위 트리) 저장 */
+    async save(path, value){
+      applyLocal(path, value);
+      if(state.mode === "local"){ LS.set(K_CLASS, state.data); return; }
+      if(state.mode !== "cloud" || !fb) return;
+      try{
+        const ref = fb.doc(fb.db, "classes", state.classId);
+        const payload = value === null
+          ? nest(path, fb.deleteField())
+          : nest(path, value);
+        await fb.setDoc(ref, payload, { merge: true });
+      }catch(e){
+        console.error("저장 실패", e);
+        toast("저장하지 못했습니다. 인터넷 연결을 확인해 주세요.");
+      }
+    },
+
+    /* 문서 처음 만들 때만 사용 */
+    async create(docData){
+      state.data = docData;
+      if(state.mode === "local"){ LS.set(K_CLASS, state.data); return; }
+      if(state.mode !== "cloud" || !fb) return;
+      const ref = fb.doc(fb.db, "classes", state.classId);
+      await fb.setDoc(ref, docData, { merge: true });
+    },
+
+    async load(){
+      if(state.mode === "local") return LS.get(K_CLASS);
+      if(state.mode !== "cloud" || !fb) return null;
+      const ref = fb.doc(fb.db, "classes", state.classId);
+      const snap = await fb.getDoc(ref);
+      return snap.exists() ? snap.data() : null;
+    },
+
+    /* ---------- 출결 문서 ----------
+       attendance/{classId}_{YYYY-MM-DD}
+       반 문서와 마찬가지로 필드 단위 merge 로만 씁니다.
+       출석한 학생은 아예 기록하지 않습니다(기본값 = 출석).            */
+    async saveAtt(date, path, value){
+      const cache = state.attCache[date] || (state.attCache[date] = { date, students:{} });
+      const parts = path.split(".");
+      let cur = cache;
+      for(let i = 0; i < parts.length - 1; i++){
+        if(typeof cur[parts[i]] !== "object" || cur[parts[i]] === null) cur[parts[i]] = {};
+        cur = cur[parts[i]];
+      }
+      const last = parts[parts.length - 1];
+      if(value === null) delete cur[last]; else cur[last] = value;
+
+      if(state.mode === "local"){ LS.set(K_ATT + date, cache); return; }
+      if(state.mode !== "cloud" || !fb) return;
+      try{
+        const ref = fb.doc(fb.db, "attendance", `${state.classId}_${date}`);
+        const payload = value === null ? nest(path, fb.deleteField()) : nest(path, value);
+        payload.date    = date;
+        payload.classId = state.classId;
+        await fb.setDoc(ref, payload, { merge: true });
+      }catch(e){
+        console.error("출결 저장 실패", e);
+        toast("출결을 저장하지 못했습니다. 인터넷 연결을 확인해 주세요.");
+      }
+    },
+
+    async loadAtt(date){
+      if(state.attCache[date]) return state.attCache[date];
+      let doc = { date, students:{}, closed:false };
+      if(state.mode === "local"){
+        const saved = LS.get(K_ATT + date);
+        state.attCache[date] = saved || doc;
+        return state.attCache[date];
+      }
+      if(state.mode === "cloud" && fb){
+        try{
+          const ref  = fb.doc(fb.db, "attendance", `${state.classId}_${date}`);
+          const snap = await fb.getDoc(ref);
+          if(snap.exists()) doc = Object.assign(doc, snap.data());
+        }catch(e){ console.error("출결 불러오기 실패", e); }
+      }
+      state.attCache[date] = doc;
+      return doc;
+    },
+
+    /* ---------- 학생 열람용 문서 ----------
+       public/{classId} 는 교사 문서에서 걸러낸 '사본'입니다.
+       쓰는 쪽이 교사 한 명뿐이므로 통째로 덮어쓰는 것이 맞습니다.
+       (반대로 classes / attendance 는 절대 통째로 쓰지 않습니다) */
+    async savePublic(docData){
+      state.publicCache = docData;
+      if(state.mode !== "cloud" || !fb) return;
+      const ref = fb.doc(fb.db, "public", state.classId);
+      await fb.setDoc(ref, docData);
+    },
+
+    async deletePublic(){
+      state.publicCache = null;
+      if(state.mode !== "cloud" || !fb) return;
+      const ref = fb.doc(fb.db, "public", state.classId);
+      await fb.deleteDoc(ref);
+    },
+
+    /* 학생 화면에서 호출 — 로그인 없이 읽습니다 */
+    async loadPublic(classId){
+      if(state.mode !== "cloud" || !fb) return state.publicCache || null;
+      const ref  = fb.doc(fb.db, "public", classId);
+      const snap = await fb.getDoc(ref);
+      return snap.exists() ? snap.data() : null;
+    }
+  };
+})();
+
+/* ============================================================
+   3. 이름 보호 계층
+   ------------------------------------------------------------
+   ★ 설계
+     · 실명은 교사 브라우저에서 AES-256-GCM 으로 암호화한 뒤 저장한다.
+       열쇠는 교사가 정한 암호에서 PBKDF2 로 만들며, 서버로 보내지 않는다.
+     · 가려진 이름(김○○)은 항상 함께 저장한다.
+       암호를 잊어도 앱이 계속 돌아가게 하는 안전판이다.
+     · 화면에 그릴 때는 nameOf(s) 하나만 쓴다.
+       잠금이 풀려 있으면 실명, 잠겨 있으면 가려진 이름이 나온다.
+   ============================================================ */
+
+/* 가려진 이름 만들기 */
+function makeDisplayName(name, no, policy){
+  const n = String(name || "").trim();
+  if(!n) return `${no}번`;
+  if(policy === "surname") return `${n[0]}(${no})`;
+  return n[0] + "○".repeat(Math.max(1, n.length - 1));   // masked
+}
+
+/* 화면에 쓰는 이름 — 이 함수 외의 경로로 실명을 그리지 않는다 */
+function nameOf(s){
+  if(state.nameMode === "number") return s.displayName || (s.sid ? String(s.sid) : `${s.no}번`);
+  return state.names[s.id] || s.displayName || `${s.no}번`;
+}
+
+const VERIFY_TEXT = "MCA-OK";
+
+const crypt = {
+  key: null,
+
+  toB64(buf){
+    const b = new Uint8Array(buf);
+    let out = "";
+    for(let i = 0; i < b.length; i++) out += String.fromCharCode(b[i]);
+    return btoa(out);
+  },
+  fromB64(str){
+    return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+  },
+
+  /* 암호 + 소금값 → 열쇠 */
+  async derive(pass, saltB64){
+    const km = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name:"PBKDF2", salt: crypt.fromB64(saltB64), iterations: 200000, hash:"SHA-256" },
+      km, { name:"AES-GCM", length:256 }, true, ["encrypt","decrypt"]);
+  },
+
+  async enc(text){
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt(
+      { name:"AES-GCM", iv }, crypt.key, new TextEncoder().encode(String(text)));
+    return crypt.toB64(iv) + ":" + crypt.toB64(ct);
+  },
+
+  async dec(blob){
+    const [ivB, ctB] = String(blob).split(":");
+    const pt = await crypto.subtle.decrypt(
+      { name:"AES-GCM", iv: crypt.fromB64(ivB) }, crypt.key, crypt.fromB64(ctB));
+    return new TextDecoder().decode(pt);
+  }
+};
+
+/* ---------- 열쇠를 이 기기에 기억하기 ----------
+   저장 위치는 교사 본인의 브라우저다. 서버에는 올라가지 않는다.
+   공용 컴퓨터에서는 쓰지 않도록 화면에 안내한다.               */
+const KEY_STORE = "mca_key_";
+async function rememberKey(){
+  try{
+    const raw = await crypto.subtle.exportKey("raw", crypt.key);
+    localStorage.setItem(KEY_STORE + state.classId, crypt.toB64(raw));
+  }catch(e){ /* 저장을 못 쓰는 환경이면 그냥 넘어간다 */ }
+}
+async function recallKey(){
+  try{
+    const b = localStorage.getItem(KEY_STORE + state.classId);
+    if(!b) return false;
+    crypt.key = await crypto.subtle.importKey(
+      "raw", crypt.fromB64(b), { name:"AES-GCM" }, true, ["encrypt","decrypt"]);
+    return true;
+  }catch(e){ return false; }
+}
+function forgetKey(){
+  try{ localStorage.removeItem(KEY_STORE + state.classId); }catch(e){}
+}
+
+/* ---------- 잠금 상태 ---------- */
+function lockStatus(){
+  if(crypt.key) return "open";
+  return state.data && state.data.nameVerify ? "locked" : "none";
+}
+
+/* 암호 처음 설정하기 (기존 평문 이름이 있으면 함께 암호화) */
+async function setupLock(pass, silent){
+  const salt = crypt.toB64(crypto.getRandomValues(new Uint8Array(16)));
+  crypt.key  = await crypt.derive(pass, salt);
+  await store.save("nameSalt", salt);
+  await store.save("nameVerify", await crypt.enc(VERIFY_TEXT));
+  await encryptRoster();
+  if(!silent) toast("암호를 설정했습니다.");
+}
+
+/* 잠금 해제 */
+async function unlock(pass){
+  const salt = state.data.nameSalt;
+  if(!salt) return false;
+  const key = await crypt.derive(pass, salt);
+  const prev = crypt.key;
+  crypt.key = key;
+  try{
+    if(await crypt.dec(state.data.nameVerify) !== VERIFY_TEXT) throw new Error("mismatch");
+  }catch(e){
+    crypt.key = prev;
+    return false;
+  }
+  await decryptRoster();
+  await encryptRoster();     // 예전 평문 이름이 남아 있으면 이때 정리된다
+  return true;
+}
+
+function lockNow(){
+  crypt.key = null;
+  state.names = {};
+  forgetKey();
+}
+
+/* 평문 이름 → 암호문. 저장소에서 평문을 지운다 */
+async function encryptRoster(){
+  const list = [];
+  let changed = false;
+  for(const s of (state.data.students || [])){
+    const o = { ...s };
+    if(o.name){
+      state.names[o.id] = o.name;
+      o.nameEnc = await crypt.enc(o.name);
+      delete o.name;
+      changed = true;
+    }
+    if(!o.displayName){
+      o.displayName = makeDisplayName(state.names[o.id] || "", o.no, state.data.nameMasking);
+      changed = true;
+    }
+    list.push(o);
+  }
+  if(changed) await store.save("students", list);
+}
+
+/* 암호문 → 메모리 상의 실명 */
+async function decryptRoster(){
+  state.names = {};
+  for(const s of (state.data.students || [])){
+    if(s.nameEnc){
+      try{ state.names[s.id] = await crypt.dec(s.nameEnc); }catch(e){}
+    }else if(s.name){
+      state.names[s.id] = s.name;
+    }
+  }
+}
+
+/* 가려진 이름 모양이 바뀌면 다시 만든다 (잠금 해제 상태에서만 가능) */
+function rebuildDisplayNames(policy){
+  return (state.data.students || []).map(s => ({
+    ...s,
+    displayName: makeDisplayName(state.names[s.id] || "", s.no, policy)
+  }));
+}
+
+/* ---------- 잠금 화면 그리기 ---------- */
+function renderLockUI(){
+  /* 번호만 쓰는 경우 이름이 없으므로 잠금 개념 자체가 없다 */
+  if(state.nameMode === "number"){
+    $("#rosterSeg").classList.add("hidden");
+    ["manual","paste","file"].forEach(m => $("#mode-" + m).classList.add("hidden"));
+    $("#rosterGate").classList.add("hidden");
+    $("#btnClearRoster").disabled = false;
+    return;
+  }
+  const st = lockStatus();
+  const box = $("#lockState");
+  box.dataset.s = st;
+
+  const txt = { none:"암호가 설정되지 않았습니다", locked:"이름이 잠겨 있습니다", open:"이름이 보입니다" };
+  const sub = { none:"", locked:"김○○ 로 표시 중", open:"실명 표시 중" };
+  $("#lockTxt").textContent = txt[st];
+  $("#lockSub").textContent = sub[st];
+
+  $("#lockSetup").classList.toggle("hidden", st !== "none");
+  $("#lockOpen").classList.toggle("hidden", st !== "locked");
+  $("#lockDone").classList.toggle("hidden", st !== "open");
+
+  /* 명단 편집은 잠금이 풀렸을 때만 */
+  const gate = $("#rosterGate");
+  const canEdit = st === "open";
+  $("#rosterSeg").classList.toggle("hidden", !canEdit);
+  ["manual","paste","file"].forEach(m => {
+    const el = $("#mode-" + m);
+    if(!canEdit) el.classList.add("hidden");
+  });
+  $("#btnClearRoster").disabled = !canEdit;
+
+  if(canEdit){
+    gate.classList.add("hidden");
+    const sel = $('.seg button[aria-selected="true"]');
+    const m = sel ? sel.dataset.mode : "manual";
+    $("#mode-" + m).classList.remove("hidden");
+  }else{
+    gate.classList.remove("hidden");
+    gate.innerHTML = st === "none"
+      ? "명단을 넣기 전에 위에서 <b>이름 보호 암호</b>를 설정해 주세요. 이름을 안전하게 저장하기 위한 단계입니다."
+      : "<b>잠금을 해제하면</b> 명단을 넣거나 고칠 수 있습니다.";
+  }
+
+  /* 표시 방식 */
+  $$("#policyBox input").forEach(i => { i.disabled = st !== "open"; });
+  $("#policyNote").textContent = st === "open"
+    ? "잠긴 상태에서 학생 이름이 이렇게 보입니다."
+    : "잠금을 해제하면 바꿀 수 있습니다.";
+}
+
+/* ============================================================
+   4. 작은 도구들
+   ============================================================ */
+const $  = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+let toastTimer = null;
+function toast(msg){
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("on"), 2200);
+}
+
+/* 확인 모달 — 확인이면 true */
+function confirmBox({ title, body, ok = "확인", cancel = "취소" }){
+  return new Promise(resolve => {
+    const wrap = document.createElement("div");
+    wrap.className = "modal";
+    wrap.innerHTML = `
+      <div class="box" role="dialog" aria-modal="true">
+        <h3></h3><p></p>
+        <div class="btn-row">
+          <button class="btn ghost" data-a="0"></button>
+          <button class="btn primary" data-a="1"></button>
+        </div>
+      </div>`;
+    $("h3", wrap).textContent = title;
+    $("p", wrap).textContent = body;
+    $('[data-a="0"]', wrap).textContent = cancel;
+    $('[data-a="1"]', wrap).textContent = ok;
+    wrap.addEventListener("click", e => {
+      const b = e.target.closest("[data-a]");
+      if(!b) return;
+      wrap.remove();
+      resolve(b.dataset.a === "1");
+    });
+    document.body.appendChild(wrap);
+    $('[data-a="1"]', wrap).focus();
+  });
+}
+
+/* 다음 번호 — 이름만 연달아 입력할 수 있도록 미리 채워 둔다 */
+function nextNo(){
+  const list = state.data && state.data.students ? state.data.students : [];
+  return list.reduce((m, s) => Math.max(m, s.no || 0), 0) + 1;
+}
+function fillNextNo(){
+  const el = $("#inNo");
+  if(el) el.value = nextNo();
+}
+
+/* 다음 학생 id 발급 (s01, s02 ...) */
+function nextStudentId(){
+  const used = new Set((state.data.students || []).map(s => s.id));
+  let i = 1;
+  while(used.has("s" + String(i).padStart(2, "0"))) i++;
+  return "s" + String(i).padStart(2, "0");
+}
+
+/* ============================================================
+   5. 로그인
+   ============================================================ */
+function firebaseConfigured(){
+  return !!(CONFIG.firebase && CONFIG.firebase.apiKey && CONFIG.firebase.projectId);
+}
+
+async function startWithGoogle(){
+  if(!firebaseConfigured()){
+    toast("Firebase 설정이 아직 비어 있습니다. 둘러보기로 먼저 확인해 보세요.");
+    return;
+  }
+  try{
+    const [{ initializeApp }, authMod, dbMod] = await Promise.all([
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`),
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`)
+    ]);
+
+    const app  = initializeApp(CONFIG.firebase);
+    const auth = authMod.getAuth(app);
+    const db   = dbMod.getFirestore(app);
+
+    // 학생 화면(Stage 3)에서 쓸 익명 로그인도 여기서 함께 준비해 둡니다.
+    // signInAnonymously 는 Stage 3에서 호출합니다.
+    store.setFirebase({
+      db,
+      doc: dbMod.doc,
+      setDoc: dbMod.setDoc,
+      getDoc: dbMod.getDoc,
+      deleteDoc: dbMod.deleteDoc,
+      deleteField: dbMod.deleteField
+    });
+
+    const cred = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
+    state.mode    = "cloud";
+    state.uid     = cred.user.uid;
+    state.classId = cred.user.uid;   // 교사 1명 = 반 1개 (Stage 1 범위)
+
+    let doc = await store.load();
+    if(!doc){
+      doc = emptyClassDoc(state.uid);
+      await store.create(doc);
+      toast("우리 반을 새로 만들었습니다.");
+    }
+    // 예전 문서에 없던 항목 보정
+    state.data = Object.assign(emptyClassDoc(state.uid), doc);
+    migrateDuty();
+
+    // 이 기기에 열쇠를 기억해 둔 경우 자동으로 잠금을 푼다
+    if(state.data.nameVerify && await recallKey()){
+      try{
+        if(await crypt.dec(state.data.nameVerify) === VERIFY_TEXT) await decryptRoster();
+        else { crypt.key = null; forgetKey(); }
+      }catch(e){ crypt.key = null; forgetKey(); }
+    }
+    enterApp();
+  }catch(e){
+    console.error(e);
+    toast("로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  }
+}
+
+async function startDemo(){
+  state.mode     = "demo";
+  state.nameMode = "real";
+  state.uid     = "demo";
+  state.classId = "demo";
+  state.data    = emptyClassDoc("demo");
+
+  // 둘러보기도 실제와 같은 암호화 경로를 지납니다 (암호는 자동 설정)
+  await setupLock("demo-preview-key", true);
+
+  const sample = ["김정우","이인우","박찬우","최정표","한은찬","오서연","장민재","윤지호"];
+  const list = [];
+  for(let i = 0; i < sample.length; i++){
+    const id = "s" + String(i + 1).padStart(2, "0");
+    list.push({
+      id, no: i + 1,
+      nameEnc: await crypt.enc(sample[i]),
+      displayName: makeDisplayName(sample[i], i + 1, state.data.nameMasking)
+    });
+    state.names[id] = sample[i];
+  }
+  state.data.students = list;
+  // 둘러보기용 예시 시간표·일정
+  state.data.timetable = {
+    mon: ["국어","수학","영어","도덕","과학","체육","창체"],
+    tue: ["수학","사회","국어","음악","영어","과학","동아리"],
+    wed: ["영어","도덕","수학","국어","미술","미술","창체"],
+    thu: ["과학","국어","체육","영어","수학","기술","진로"],
+    fri: ["사회","영어","국어","수학","과학","자율","자율"]
+  };
+  const t = new Date(); t.setDate(t.getDate() + 5);
+  state.data.ddays = [
+    { id:"d1", title:"국어 수행평가", date: ymd(t), cat:"수행평가" },
+    { id:"d2", title:"1학기 기말고사", date: ymd(new Date(t.getFullYear(), t.getMonth() + 1, 3)), cat:"지필평가" }
+  ];
+  state.data.recurring = [
+    { id:"r1", title:"스포츠클럽", freq:"weekly", day:2, nth:1, anchor:null, skips:[] },
+    { id:"r2", title:"동아리 활동", freq:"monthly", day:3, nth:2, anchor:null, skips:[] }
+  ];
+  state.data.duty = {
+    enabled: true, start: ymd(today()),
+    groups: [
+      { id:"g1", name:"칠판", mode:"members", per:1, members:["s01","s02","s03","s04","s05"] },
+      { id:"g2", name:"청소", mode:"all", per:4, members:[] }
+    ]
+  };
+
+  $("#demoBanner").classList.remove("hidden");
+  enterApp();
+}
+
+/* 예전 문서의 당번 설정(a=당번 인원, b=청소 인원)을 그룹 구조로 옮긴다 */
+function migrateDuty(){
+  const D = state.data.duty;
+  if(!D || D.groups) return;
+  state.data.duty = {
+    enabled: !!D.enabled,
+    start: D.start || null,
+    groups: [
+      { id:"g1", name:"당번", mode:"all", per: D.a ?? 2, members:[] },
+      { id:"g2", name:"청소", mode:"all", per: D.b ?? 4, members:[] }
+    ]
+  };
+}
+
+function enterApp(){
+  showOnly("screen-app");
+  setupFolds();
+  if(state.mode === "demo") $("#demoBanner").classList.remove("hidden");
+  renderAll();
+}
+
+/* ============================================================
+   6. 명단 가져오기 (붙여넣기 / 파일)
+   ------------------------------------------------------------
+   화면 문구에는 CSV·마크다운 같은 용어를 쓰지 않습니다.
+   ============================================================ */
+
+/* 여러 줄 텍스트 → [{no, name}] */
+function parseRows(rows){
+  const out = [];
+  rows.forEach(cells => {
+    const c = cells.map(x => String(x ?? "").trim()).filter(x => x !== "");
+    if(c.length === 0) return;
+
+    // 머리글 줄 건너뛰기
+    const joined = c.join(" ");
+    if(/번호|이름|성명|no\.?|name/i.test(joined) && c.length <= 3 && !/\d{1,2}\s*$/.test(c[0])) return;
+
+    let no = null, name = null;
+    if(c.length >= 2 && /^\d{1,3}$/.test(c[0])){
+      no = parseInt(c[0], 10);
+      name = c[1];
+    }else{
+      name = c[0];
+    }
+    if(!name || /^\d+$/.test(name)) return;   // 이름 없는 줄 제외
+    out.push({ no, name });
+  });
+
+  // 번호가 없는 줄은 순서대로 자동 부여
+  let auto = 1;
+  const usedNos = new Set(out.map(r => r.no).filter(Boolean));
+  out.forEach(r => {
+    if(r.no == null){
+      while(usedNos.has(auto)) auto++;
+      r.no = auto;
+      usedNos.add(auto);
+    }
+  });
+  out.sort((a, b) => a.no - b.no);
+  return out;
+}
+
+/* 붙여넣은 텍스트 파싱 (탭 / 쉼표 / 여러 칸 / 표 형식 모두 지원) */
+function parseText(text){
+  const lines = String(text).split(/\r?\n/);
+  const rows = [];
+  lines.forEach(line => {
+    let l = line.trim();
+    if(!l) return;
+    // 표 형식(| 로 감싼 줄) 처리
+    if(l.startsWith("|")){
+      if(/^\|[\s:\-|]+\|?$/.test(l)) return;   // 구분선 줄
+      l = l.replace(/^\||\|$/g, "");
+      rows.push(l.split("|"));
+      return;
+    }
+    if(l.includes("\t"))      rows.push(l.split("\t"));
+    else if(l.includes(","))  rows.push(l.split(","));
+    else                      rows.push(l.split(/\s{2,}|\s/));
+  });
+  return parseRows(rows);
+}
+
+/* 엑셀 파일 파싱 */
+async function parseExcel(file){
+  if(typeof XLSX === "undefined"){
+    toast("엑셀 읽기 기능을 불러오지 못했습니다. 붙여넣기를 사용해 주세요.");
+    return [];
+  }
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+  return parseRows(rows.map(r => Array.isArray(r) ? r : [r]));
+}
+
+function showImportPreview(list){
+  if(!list.length){
+    toast("번호와 이름을 찾지 못했습니다. 형식을 확인해 주세요.");
+    return;
+  }
+  state.pendingImport = list;
+  $("#previewCount").textContent = list.length + "명";
+  const policy = state.data.nameMasking;
+  $("#previewBody").innerHTML = list.map(r =>
+    `<span class="chip"><b>${r.no}</b>${escapeHtml(makeDisplayName(r.name, r.no, policy))}</span>`
+  ).join("");
+  $("#importPreview").classList.remove("hidden");
+  $("#importPreview").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+async function applyImport(){
+  if(!crypt.key){ toast("먼저 이름 보호 잠금을 해제해 주세요."); return; }
+  const list = state.pendingImport || [];
+  const policy = state.data.nameMasking;
+  const students = [];
+  state.names = {};
+  for(let i = 0; i < list.length; i++){
+    const r  = list[i];
+    const id = "s" + String(i + 1).padStart(2, "0");
+    students.push({
+      id, no: r.no,
+      nameEnc: await crypt.enc(r.name),
+      displayName: makeDisplayName(r.name, r.no, policy)
+    });
+    state.names[id] = r.name;
+  }
+  await store.save("students", students);
+  await store.save("seats", {});          // 명단이 바뀌면 자리는 비웁니다
+  state.pendingImport = null;
+  $("#importPreview").classList.add("hidden");
+  $("#taPaste").value = "";
+  $("#inFile").value = "";
+  renderAll();
+  toast(students.length + "명을 저장했습니다.");
+}
+
+/* ============================================================
+   7. 화면 그리기 — 명단
+   ============================================================ */
+function renderRoster(){
+  const list = state.data.students || [];
+  $("#rosterCount").textContent = list.length + "명";
+  fillNextNo();
+  const box = $("#rosterList");
+
+  if(!list.length){
+    box.innerHTML = `<p class="sub" style="padding:18px 4px;">아직 명단이 없습니다. 위에서 학생을 추가해 주세요.</p>`;
+    return;
+  }
+  box.innerHTML = list.map(s => `
+    <div class="roster-row">
+      <span class="no">${s.no}</span>
+      <span class="nm">${escapeHtml(nameOf(s))}</span>
+      <button class="del" data-del="${s.id}" aria-label="${escapeHtml(nameOf(s))} 삭제">×</button>
+    </div>`).join("");
+}
+
+function renderPolicy(){
+  const p = state.data.nameMasking || "masked";
+  $$("#policyBox .opt").forEach(el => {
+    const on = el.dataset.v === p;
+    el.dataset.on = on ? "1" : "0";
+    $("input", el).checked = on;
+  });
+}
+
+/* ============================================================
+   8. 화면 그리기 — 자리 배치 (시그니처 화면)
+   ============================================================ */
+function seatKey(r, c){ return `r${r}c${c}`; }
+
+function studentById(id){
+  return (state.data.students || []).find(s => s.id === id) || null;
+}
+
+function renderSeats(justPlaced){
+  const { rows, cols } = state.data.grid || CONFIG.seat;
+  const grid = $("#seatGrid");
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  /* 칠판이 화면 아래에 있으므로 칠판에서 가까운 줄(r0)을 마지막에 그린다 */
+  let html = "";
+  for(let r = rows - 1; r >= 0; r--){
+    for(let c = 0; c < cols; c++){
+      const key = seatKey(r, c);
+      const sid = (state.data.seats || {})[key];
+      const s = sid ? studentById(sid) : null;
+      const picked = state.pickedStudent && s && s.id === state.pickedStudent;
+      const target = state.pickedStudent && !s;
+      const cls = [
+        "seat",
+        s ? "filled" : "empty",
+        picked ? "picked" : "",
+        target ? "target" : "",
+        justPlaced === key ? "placed" : ""
+      ].filter(Boolean).join(" ");
+
+      html += `<button class="${cls}" data-seat="${key}">` +
+              (s ? `<span class="sno">${s.no}</span><span class="snm">${escapeHtml(nameOf(s))}</span>` : "") +
+              `</button>`;
+    }
+  }
+  grid.innerHTML = html;
+
+  $("#inRows").value = rows;
+  $("#inCols").value = cols;
+  renderTray();
+}
+
+function renderTray(){
+  const seated = new Set(Object.values(state.data.seats || {}));
+  const rest = (state.data.students || []).filter(s => !seated.has(s.id));
+  const list = $("#trayList");
+
+  if(!rest.length){
+    list.innerHTML = `<span class="done">모두 앉았습니다.</span>`;
+    return;
+  }
+  list.innerHTML = rest.map(s => `
+    <button class="tag" data-pick="${s.id}" data-on="${state.pickedStudent === s.id ? 1 : 0}">
+      <b>${s.no}</b>${escapeHtml(nameOf(s))}
+    </button>`).join("");
+}
+
+/* 자리를 눌렀을 때 */
+async function onSeatTap(key){
+  const seats = state.data.seats || {};
+  const sitting = seats[key];
+
+  // (1) 아무도 집어들지 않은 상태에서 앉은 학생을 누름 → 집어들기
+  if(!state.pickedStudent && sitting){
+    state.pickedStudent = sitting;
+    renderSeats();
+    return;
+  }
+  // (2) 집어든 학생과 같은 자리를 다시 누름 → 자리에서 빼기
+  if(state.pickedStudent && sitting === state.pickedStudent){
+    state.pickedStudent = null;
+    await store.save(`seats.${key}`, null);
+    renderSeats();
+    return;
+  }
+  // (3) 집어든 상태에서 빈 자리를 누름 → 앉히기 (이전 자리는 비움)
+  if(state.pickedStudent && !sitting){
+    const id = state.pickedStudent;
+    const prev = Object.keys(seats).find(k => seats[k] === id);
+    if(prev) await store.save(`seats.${prev}`, null);
+    await store.save(`seats.${key}`, id);
+    state.pickedStudent = null;
+    renderSeats(key);
+    return;
+  }
+  // (4) 집어든 상태에서 다른 학생이 앉은 자리를 누름 → 자리 바꾸기
+  if(state.pickedStudent && sitting){
+    const id = state.pickedStudent;
+    const prev = Object.keys(seats).find(k => seats[k] === id);
+    await store.save(`seats.${key}`, id);
+    if(prev) await store.save(`seats.${prev}`, sitting);
+    state.pickedStudent = null;
+    renderSeats(key);
+    return;
+  }
+  // (5) 아무것도 안 집은 상태에서 빈 자리 → 안내
+  toast("먼저 오른쪽에서 앉힐 학생을 골라 주세요.");
+}
+
+/* ============================================================
+   9. 전체 렌더
+   ============================================================ */
+function renderAll(){
+  $("#hdrClass").textContent = state.data.className || CONFIG.defaultClassName;
+  $("#inClassName").value = state.data.className || "";
+  renderModePanel();
+  renderLockUI();
+  renderRoster();
+  renderPolicy();
+  renderSeats();
+  renderTTEdit();
+  renderRecList();
+  renderDdList();
+  renderDuty();
+  renderSchoolPanel();
+  renderDash();
+  renderPublicPanel();
+  $("#inPw").placeholder = state.data.passwordHash
+    ? "설정되어 있습니다 (바꾸려면 새로 입력)"
+    : "비우면 누구나 볼 수 있습니다";
+}
+
+function switchTab(tab){
+  state.tab = tab;
+  state.pickedStudent = null;
+  ["manage","seat","home","attend"].forEach(t => {
+    $("#tab-" + t).classList.toggle("hidden", t !== tab);
+  });
+  $$(".tabbar button").forEach(b =>
+    b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false"));
+  $("#hdrTitle").textContent =
+    ({ manage:"관리", seat:"자리 배치", home:"조회", attend:"출석" })[tab];
+  if(tab === "seat")   renderSeats();
+  if(tab === "home")   renderDash();
+  if(tab === "attend") openAttendance();
+  window.scrollTo({ top:0 });
+}
+
+/* ============================================================
+   10. 이벤트 연결
+   ============================================================ */
+
+/* 로그인 */
+$("#btnGoogle").addEventListener("click", startWithGoogle);
+$("#btnDemo").addEventListener("click", startDemo);
+$("#btnBackSetup").addEventListener("click", () => { LS.del(K_SETUP); showOnly("screen-setup"); });
+
+/* 탭 이동 */
+$$(".tabbar button").forEach(b =>
+  b.addEventListener("click", () => switchTab(b.dataset.tab)));
+
+/* 반 이름 */
+$("#btnSaveClassName").addEventListener("click", async () => {
+  const v = $("#inClassName").value.trim() || CONFIG.defaultClassName;
+  await store.save("className", v);
+  $("#hdrClass").textContent = v;
+  toast("반 이름을 저장했습니다.");
+});
+
+/* 명단 입력 방식 전환 */
+$$('.seg button[data-mode]').forEach(b => {
+  b.addEventListener("click", () => {
+    $$('.seg button[data-mode]').forEach(x =>
+      x.setAttribute("aria-selected", x === b ? "true" : "false"));
+    ["manual","paste","file"].forEach(m =>
+      $("#mode-" + m).classList.toggle("hidden", m !== b.dataset.mode));
+    $("#importPreview").classList.add("hidden");
+  });
+});
+
+/* 직접 입력 추가 */
+async function addOne(){
+  if(!crypt.key){ toast("먼저 이름 보호 잠금을 해제해 주세요."); return; }
+  const name = $("#inName").value.trim();
+  if(!name){ toast("이름을 입력해 주세요."); $("#inName").focus(); return; }
+
+  const list = [...(state.data.students || [])];
+  let no = parseInt($("#inNo").value, 10);
+  if(!no || no < 1) no = (list.reduce((m, s) => Math.max(m, s.no || 0), 0) + 1);
+
+  const id = nextStudentId();
+  list.push({
+    id, no,
+    nameEnc: await crypt.enc(name),                                  // 실명은 암호문으로만 저장
+    displayName: makeDisplayName(name, no, state.data.nameMasking)    // 가려진 이름은 항상 함께
+  });
+  state.names[id] = name;
+  list.sort((a, b) => a.no - b.no);
+
+  await store.save("students", list);
+  $("#inName").value = "";
+  renderRoster();          // 안에서 fillNextNo() 가 다음 번호를 채운다
+  $("#inName").focus();    // 커서는 계속 이름 칸에 둔다
+}
+$("#btnAddOne").addEventListener("click", addOne);
+$("#inName").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); addOne(); }
+});
+/* 번호를 직접 고쳤을 때는 엔터로 이름 칸으로 넘어간다 */
+$("#inNo").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); $("#inName").focus(); }
+});
+
+/* 붙여넣기 확인 */
+$("#btnParsePaste").addEventListener("click", () => {
+  showImportPreview(parseText($("#taPaste").value));
+});
+
+/* 파일 선택 */
+$("#inFile").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const isExcel = /\.(xlsx|xls)$/i.test(f.name);
+  const list = isExcel ? await parseExcel(f) : parseText(await f.text());
+  showImportPreview(list);
+});
+
+/* 가져오기 저장 / 취소 */
+$("#btnApplyImport").addEventListener("click", async () => {
+  if((state.data.students || []).length){
+    const ok = await confirmBox({
+      title: "기존 명단을 바꿉니다",
+      body: "지금 저장하면 현재 명단과 자리 배치가 새 명단으로 바뀝니다. 계속할까요?",
+      ok: "바꾸기"
+    });
+    if(!ok) return;
+  }
+  applyImport();
+});
+$("#btnCancelImport").addEventListener("click", () => {
+  state.pendingImport = null;
+  $("#importPreview").classList.add("hidden");
+});
+
+/* 학생 한 명 삭제 */
+$("#rosterList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del]");
+  if(!b) return;
+  const id = b.dataset.del;
+  const list = (state.data.students || []).filter(s => s.id !== id);
+  await store.save("students", list);
+  // 앉아 있던 자리도 비웁니다
+  const seats = state.data.seats || {};
+  const key = Object.keys(seats).find(k => seats[k] === id);
+  if(key) await store.save(`seats.${key}`, null);
+  renderAll();
+});
+
+/* 명단 전체 삭제 */
+$("#btnClearRoster").addEventListener("click", async () => {
+  if(!(state.data.students || []).length) return;
+  const ok = await confirmBox({
+    title: "명단을 모두 지웁니다",
+    body: "학생 명단과 자리 배치가 함께 사라집니다. 되돌릴 수 없습니다.",
+    ok: "모두 지우기"
+  });
+  if(!ok) return;
+  await store.save("students", []);
+  await store.save("seats", {});
+  renderAll();
+  toast("명단을 지웠습니다.");
+});
+
+/* 가려진 이름 표시 방식 */
+$("#policyBox").addEventListener("change", async e => {
+  const v = e.target.value;
+  if(!v) return;
+  if(!crypt.key){ toast("먼저 잠금을 해제해 주세요."); renderLockUI(); return; }
+  await store.save("nameMasking", v);
+  await store.save("students", rebuildDisplayNames(v));
+  renderAll();
+  toast("표시 방식을 바꿨습니다.");
+});
+
+/* ---------- 사용 방식 ---------- */
+$("#bkToggles").addEventListener("change", e => {
+  if(e.target.name === "bk") switchBackend(e.target.value);
+});
+$("#nmToggles").addEventListener("change", e => {
+  if(e.target.name === "nm") switchNameMode(e.target.value);
+});
+
+/* ---------- 백업 ---------- */
+$("#btnExport").addEventListener("click", doExport);
+$("#btnPickImport").addEventListener("click", () => $("#inImport").click());
+$("#inImport").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const raw = await readJsonFile(f);
+  e.target.value = "";
+  if(!raw) return;
+  const ok = await confirmBox({
+    title: "지금 자료를 덮어씁니다",
+    body: "파일 내용으로 명단·시간표·일정·출결이 모두 바뀝니다. 되돌릴 수 없습니다.",
+    ok: "가져오기"
+  });
+  if(!ok) return;
+  if(await restoreBackup(raw)){
+    renderAll();
+    switchTab("manage");
+    toast("파일을 가져왔습니다.");
+  }
+});
+
+/* ---------- 번호만 사용할 때의 명단 ---------- */
+$("#btnMakeNos").addEventListener("click", makeNumbers);
+$("#btnParseSids").addEventListener("click", parseSids);
+
+/* ---------- 이름 보호 ---------- */
+/* 막지는 않고, 지금 정한 암호가 어느 정도인지만 알려준다 */
+function pwStrength(v){
+  if(v.length < 4)                      return { t:"조금 더 길게 입력해 주세요.", c:"var(--stamp)" };
+  if(/^\d+$/.test(v) && v.length <= 5)  return { t:"숫자만 짧게 쓰면 추측될 수 있습니다. 글자를 섞으면 훨씬 안전합니다.", c:"var(--stamp)" };
+  if(v.length <= 5)                     return { t:"쓸 수 있습니다. 조금 더 길면 더 안전합니다.", c:"#8A6D12" };
+  return { t:"좋습니다.", c:"var(--seal)" };
+}
+$("#inLockPw").addEventListener("input", e => {
+  const el = $("#pwHint");
+  if(!e.target.value){ el.textContent = "4자 이상이면 됩니다."; el.style.color = ""; return; }
+  const r = pwStrength(e.target.value);
+  el.textContent = r.t;
+  el.style.color = r.c;
+});
+
+$("#btnSetLock").addEventListener("click", async () => {
+  const a = $("#inLockPw").value, b = $("#inLockPw2").value;
+  if(a.length < 4){ toast("암호는 4자 이상으로 정해 주세요."); return; }
+  if(a !== b){ toast("두 번 입력한 암호가 다릅니다."); return; }
+  await setupLock(a);
+  $("#inLockPw").value = ""; $("#inLockPw2").value = "";
+  renderAll();
+});
+
+$("#btnUnlock").addEventListener("click", async () => {
+  const pw = $("#inUnlockPw").value;
+  if(!pw) return;
+  if(await unlock(pw)){
+    if($("#chkRemember").checked) await rememberKey();
+    $("#inUnlockPw").value = "";
+    renderAll();
+    toast("잠금을 해제했습니다.");
+    if(!(state.data.students || []).length) setTimeout(() => $("#inName").focus(), 100);
+  }else{
+    toast("암호가 맞지 않습니다.");
+    $("#inUnlockPw").value = "";
+  }
+});
+
+$("#btnLock").addEventListener("click", () => {
+  lockNow();
+  renderAll();
+  toast("이름을 다시 잠갔습니다.");
+});
+
+$("#btnChangePw").addEventListener("click", async () => {
+  const ok = await confirmBox({
+    title: "암호를 바꿉니다",
+    body: "새 암호로 이름을 다시 암호화합니다. 다른 기기에서는 새 암호로 잠금을 해제해야 합니다.",
+    ok: "계속"
+  });
+  if(!ok) return;
+  const pw = prompt("새 암호를 입력해 주세요 (4자 이상)");
+  if(!pw || pw.length < 4){ toast("암호는 4자 이상으로 정해 주세요."); return; }
+
+  // 메모리에 있는 실명을 새 열쇠로 다시 암호화한다
+  const salt = crypt.toB64(crypto.getRandomValues(new Uint8Array(16)));
+  crypt.key  = await crypt.derive(pw, salt);
+  const list = [];
+  for(const st of (state.data.students || [])){
+    list.push({ ...st, nameEnc: await crypt.enc(state.names[st.id] || "") });
+  }
+  await store.save("nameSalt", salt);
+  await store.save("nameVerify", await crypt.enc(VERIFY_TEXT));
+  await store.save("students", list);
+  forgetKey();
+  renderAll();
+  toast("암호를 바꿨습니다.");
+});
+
+/* 격자 크기 적용 */
+$("#btnApplyGrid").addEventListener("click", async () => {
+  const rows = Math.max(1, Math.min(10, parseInt($("#inRows").value, 10) || CONFIG.seat.rows));
+  const cols = Math.max(1, Math.min(10, parseInt($("#inCols").value, 10) || CONFIG.seat.cols));
+
+  // 줄어든 범위 밖에 앉은 학생은 자리에서 뺍니다
+  const seats = { ...(state.data.seats || {}) };
+  let removed = 0;
+  Object.keys(seats).forEach(k => {
+    const m = k.match(/^r(\d+)c(\d+)$/);
+    if(!m) return;
+    if(+m[1] >= rows || +m[2] >= cols){ delete seats[k]; removed++; }
+  });
+
+  await store.save("grid", { rows, cols });
+  if(removed){
+    await store.save("seats", {});          // 범위 밖 키를 확실히 지우기 위해 초기화 후
+    for(const [k, v] of Object.entries(seats)) await store.save(`seats.${k}`, v);
+    toast(`자리표를 바꿨습니다. ${removed}명은 자리에서 뺐습니다.`);
+  }else{
+    toast("자리표 크기를 바꿨습니다.");
+  }
+  renderSeats();
+});
+
+/* 번호순 자동 배치 */
+$("#btnAutoSeat").addEventListener("click", async () => {
+  const { rows, cols } = state.data.grid;
+  const list = [...(state.data.students || [])].sort((a, b) => a.no - b.no);
+  if(!list.length){ toast("먼저 학생 명단을 등록해 주세요."); return; }
+
+  const seats = {};
+  let i = 0;
+  for(let r = 0; r < rows && i < list.length; r++)
+    for(let c = 0; c < cols && i < list.length; c++)
+      seats[seatKey(r, c)] = list[i++].id;
+
+  await store.save("seats", seats);
+  state.pickedStudent = null;
+  renderSeats();
+  if(i < list.length) toast(`자리가 모자라 ${list.length - i}명이 남았습니다.`);
+  else toast("번호순으로 앉혔습니다.");
+});
+
+/* 자리 비우기 */
+$("#btnResetSeat").addEventListener("click", async () => {
+  const ok = await confirmBox({
+    title: "자리를 모두 비웁니다",
+    body: "학생 명단은 그대로 두고 자리 배치만 지웁니다.",
+    ok: "비우기"
+  });
+  if(!ok) return;
+  await store.save("seats", {});
+  state.pickedStudent = null;
+  renderSeats();
+});
+
+/* 자리 누르기 */
+$("#seatGrid").addEventListener("click", e => {
+  const b = e.target.closest("[data-seat]");
+  if(b) onSeatTap(b.dataset.seat);
+});
+
+/* 트레이에서 학생 고르기 */
+$("#trayList").addEventListener("click", e => {
+  const b = e.target.closest("[data-pick]");
+  if(!b) return;
+  state.pickedStudent = (state.pickedStudent === b.dataset.pick) ? null : b.dataset.pick;
+  renderSeats();
+});
+
+/* ============================================================
+   11. 날짜 도구
+   ============================================================ */
+const DAY_KEY   = ["sun","mon","tue","wed","thu","fri","sat"];
+const DAY_LABEL = ["일","월","화","수","목","금","토"];
+
+function ymd(d){
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function parseYmd(s){
+  const [y, m, d] = String(s).split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function diffDays(a, b){
+  return Math.round((b - a) / 86400000);
+}
+function isWeekday(d){
+  const w = d.getDay();
+  return w >= 1 && w <= 5;
+}
+function startOfWeek(d){
+  const x = new Date(d);
+  x.setDate(x.getDate() - x.getDay());
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function today(){ const d = new Date(); d.setHours(0,0,0,0); return d; }
+
+/* ============================================================
+   12. 시간표
+   ============================================================ */
+
+/* 그날 실제로 적용될 시간표를 만듭니다.
+   변경 시간표(overrides)가 있으면 그것이 기본 시간표를 대신합니다. */
+function periodsFor(dateStr){
+  const d = parseYmd(dateStr);
+  const base = (state.data.timetable || {})[DAY_KEY[d.getDay()]] || [];
+  const ov   = (state.data.overrides || {})[dateStr] || null;
+  const n    = state.data.periods || CONFIG.periodsPerDay;
+  const out  = [];
+  for(let i = 0; i < n; i++){
+    const b = (base[i] || "").trim();
+    const o = ov ? (ov[i] || "").trim() : null;
+    out.push({ base: b, value: ov ? o : b, changed: ov ? (o !== b) : false });
+  }
+  return out;
+}
+
+/* 관리 화면의 시간표 편집 표 */
+function renderTTEdit(){
+  const n  = state.data.periods || CONFIG.periodsPerDay;
+  const tt = state.data.timetable || {};
+  $("#inPeriods").value = n;
+
+  let head = "<tr><th></th>";
+  for(let i = 1; i <= 5; i++) head += `<th>${DAY_LABEL[i]}</th>`;
+  head += "</tr>";
+
+  let body = "";
+  for(let p = 0; p < n; p++){
+    body += `<tr><th>${p + 1}</th>`;
+    for(let day = 1; day <= 5; day++){
+      const k = DAY_KEY[day];
+      const v = (tt[k] || [])[p] || "";
+      body += `<td><input type="text" data-day="${k}" data-p="${p}" value="${escapeHtml(v)}" autocomplete="off"></td>`;
+    }
+    body += "</tr>";
+  }
+  $("#ttEdit").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+async function saveTimetable(){
+  const n  = state.data.periods || CONFIG.periodsPerDay;
+  const tt = {};
+  for(let day = 1; day <= 5; day++) tt[DAY_KEY[day]] = new Array(n).fill("");
+  $$("#ttEdit input").forEach(inp => {
+    tt[inp.dataset.day][+inp.dataset.p] = inp.value.trim();
+  });
+  await store.save("timetable", tt);
+  renderDash();
+  await autoSync();
+  toast("시간표를 저장했습니다.");
+}
+
+/* ============================================================
+   13. 반복 일정
+   ============================================================ */
+function occursOn(rule, d){
+  const ds = ymd(d);
+  if((rule.skips || []).includes(ds)) return false;
+  if(d.getDay() !== rule.day) return false;
+
+  if(rule.freq === "weekly")  return true;
+  if(rule.freq === "monthly") return Math.floor((d.getDate() - 1) / 7) + 1 === rule.nth;
+  if(rule.freq === "biweekly"){
+    if(!rule.anchor) return true;
+    const w = Math.floor(diffDays(startOfWeek(parseYmd(rule.anchor)), startOfWeek(d)) / 7);
+    return ((w % 2) + 2) % 2 === 0;
+  }
+  return false;
+}
+
+function recLabel(r){
+  if(r.freq === "weekly")   return `매주 ${DAY_LABEL[r.day]}`;
+  if(r.freq === "biweekly") return `격주 ${DAY_LABEL[r.day]}`;
+  return `매월 ${r.nth}째 ${DAY_LABEL[r.day]}`;
+}
+
+function renderRecList(){
+  const list = state.data.recurring || [];
+  const box  = $("#recList");
+  if(!list.length){
+    box.innerHTML = `<p class="sub">등록된 반복 일정이 없습니다.</p>`;
+    return;
+  }
+  box.innerHTML = list.map(r => `
+    <div class="item">
+      <span class="tag">${recLabel(r)}</span>
+      <span class="ttl">${escapeHtml(r.title)}</span>
+      <button class="del" data-recdel="${r.id}" aria-label="삭제">×</button>
+    </div>`).join("");
+}
+
+/* ============================================================
+   14. D-Day
+   ============================================================ */
+function ddayNum(dateStr){
+  return diffDays(today(), parseYmd(dateStr));
+}
+function ddayBadge(n){
+  if(n === 0) return { cls: "today", txt: "TODAY" };
+  if(n < 0)   return { cls: "past",  txt: `D+${-n}` };
+  return { cls: n <= 7 ? "soon" : "", txt: `D-${n}` };
+}
+
+function sortedDdays(){
+  return [...(state.data.ddays || [])].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function renderDdList(){
+  const list = sortedDdays();
+  const box  = $("#ddList");
+  if(!list.length){
+    box.innerHTML = `<p class="sub">등록된 일정이 없습니다.</p>`;
+    return;
+  }
+  box.innerHTML = list.map(x => {
+    const b = ddayBadge(ddayNum(x.date));
+    return `<div class="item">
+      <span class="dd ${b.cls}">${b.txt}</span>
+      <span class="ttl">${escapeHtml(x.title)}<br>
+        <span style="font-size:12px; color:var(--ink-45); font-family:var(--font-mono);">${x.date} · ${escapeHtml(x.cat)}</span>
+      </span>
+      <button class="del" data-dddel="${x.id}" aria-label="삭제">×</button>
+    </div>`;
+  }).join("");
+}
+
+/* ============================================================
+   15. 당번 순환
+   ------------------------------------------------------------
+   시작한 날부터 평일만 세어 번호순으로 돌립니다.
+   ============================================================ */
+/* 시작일부터 그 날까지 평일을 센 순번. 주말이거나 시작 전이면 -1 */
+function dutyIndex(dateStr, startStr){
+  if(!startStr) return -1;
+  const cur = parseYmd(dateStr);
+  if(!isWeekday(cur)) return -1;
+  const t = parseYmd(startStr);
+  if(cur < t) return -1;
+  let idx = 0, guard = 0;
+  while(ymd(t) < dateStr && guard++ < 4000){
+    if(isWeekday(t)) idx++;
+    t.setDate(t.getDate() + 1);
+  }
+  return idx;
+}
+
+/* 순번과 명단만 받아 배정한다.
+   교사 화면은 학생 객체를, 학생 화면은 번호를 넣어 같은 결과를 얻는다.
+   · mode "members" : 뽑아둔 사람들만 per명씩 순환 (5명·1명이면 월화수목금)
+   · mode "all"     : 전체 명단을 이어서 소비 (당번 다음이 청소)            */
+function assignDuty(idx, allList, groups){
+  const out = [];
+  const totalAllPer = (groups || [])
+    .filter(g => g.mode === "all")
+    .reduce((m, g) => m + (g.per || 0), 0);
+  let cursor = allList.length ? (idx * totalAllPer) % allList.length : 0;
+
+  (groups || []).forEach(g => {
+    const per = Math.max(1, g.per || 1);
+    if(g.mode === "members"){
+      const pool = g.pool || [];
+      if(!pool.length){ out.push({ name:g.name, list:[] }); return; }
+      const base = (idx * per) % pool.length;
+      out.push({ name:g.name, list: Array.from({ length: per }, (_, i) => pool[(base + i) % pool.length]) });
+    }else{
+      if(!allList.length){ out.push({ name:g.name, list:[] }); return; }
+      const list = Array.from({ length: per }, (_, i) => allList[(cursor + i) % allList.length]);
+      cursor = (cursor + per) % allList.length;
+      out.push({ name:g.name, list });
+    }
+  });
+  return out;
+}
+
+/* 교사 화면용 */
+function dutyFor(dateStr){
+  const D = state.data.duty || {};
+  if(!D.enabled) return null;
+  const idx = dutyIndex(dateStr, D.start);
+  if(idx < 0) return null;
+
+  const all = [...(state.data.students || [])].sort((a, b) => a.no - b.no);
+  const groups = (D.groups || []).map(g => ({
+    name: g.name, mode: g.mode, per: g.per,
+    pool: (g.members || []).map(id => studentById(id)).filter(Boolean)
+  }));
+  return assignDuty(idx, all, groups);
+}
+
+
+/* ---------- 관리 화면: 당번 종류 목록 ---------- */
+function renderDuty(){
+  const D = state.data.duty || {};
+  $("#chkDuty").checked = !!D.enabled;
+  $("#dutyOpts").classList.toggle("hidden", !D.enabled);
+  $("#inDutyStart").value = D.start || ymd(today());
+
+  const groups = D.groups || [];
+  $("#dutyGroups").innerHTML = groups.length ? groups.map(g => {
+    const isM = g.mode === "members";
+    const picked = (g.members || []).map(id => studentById(id)).filter(Boolean);
+    const sel = isM
+      ? (picked.length
+          ? `<div class="sel">${picked.map((st, i) => `<span class="s"><i>${i + 1}</i>${escapeHtml(nameOf(st))}</span>`).join("")}</div>`
+          : `<div class="hint">아직 아무도 안 뽑았습니다. 「학생 뽑기」를 눌러 순서대로 고르세요.</div>`)
+      : "";
+    return `
+      <div class="dgroup" data-gid="${g.id}">
+        <div class="top">
+          <span class="gn">${escapeHtml(g.name)}</span>
+          <span class="gm">${isM ? `지정 ${picked.length}명` : "전체 번호순"} · 하루 ${g.per || 1}명</span>
+          ${isM ? `<button class="gpick" data-gpick="${g.id}">학생 뽑기</button>` : ""}
+          <button class="gx" data-gdel="${g.id}" aria-label="삭제">×</button>
+        </div>
+        ${sel}
+        <div class="pool hidden" data-gpool="${g.id}"></div>
+      </div>`;
+  }).join("") : `<p class="sub">아직 당번 종류가 없습니다. 아래에서 추가해 주세요.</p>`;
+
+  renderDutyPreview();
+}
+
+/* 멤버 고르기 — 누른 순서가 그대로 요일 순서가 된다 */
+function toggleGroupPool(gid, forceOpen){
+  const pool = $(`[data-gpool="${gid}"]`);
+  if(!pool) return;
+  if(!forceOpen && !pool.classList.contains("hidden")){ pool.classList.add("hidden"); return; }
+
+  const g = ((state.data.duty || {}).groups || []).find(x => x.id === gid);
+  if(!g) return;
+  const picked = g.members || [];
+  pool.innerHTML =
+    `<div class="hint" style="margin:0 0 4px;">누른 순서대로 요일이 정해집니다. 다시 누르면 빠집니다.</div>` +
+    (state.data.students || []).map(st => {
+      const i = picked.indexOf(st.id);
+      return `<button data-gmem="${gid}|${st.id}" data-on="${i >= 0 ? 1 : 0}">${
+        i >= 0 ? `<span style="font-family:var(--font-mono)">${i + 1}</span> ` : ""
+      }${escapeHtml(nameOf(st))}</button>`;
+    }).join("");
+  pool.classList.remove("hidden");
+}
+
+/* 당번이 안 나오는 이유를 한 줄로 알려준다 */
+function dutyReason(){
+  const D = state.data.duty || {};
+  if(!D.enabled)  return "당번 순환이 꺼져 있습니다.";
+  if(!D.start)    return "「순환을 시작한 날」을 정해 주세요.";
+  if(!(state.data.students || []).length) return "먼저 관리 화면에서 학생 명단을 등록해 주세요.";
+  if(!(D.groups || []).length)            return "당번 종류를 하나 이상 추가해 주세요.";
+  const need = (D.groups || []).filter(g => g.mode === "members" && !(g.members || []).length).map(g => g.name);
+  if(need.length) return `${need.join(", ")} 당번에 「학생 뽑기」로 학생을 골라 주세요.`;
+  if(parseYmd(D.start) > today()) return "시작한 날이 아직 오지 않았습니다.";
+  return null;
+}
+
+/* 이번 주 배정 표 — 설정이 맞는지 눈으로 확인하는 용도 */
+function renderDutyPreview(){
+  const D = state.data.duty || {};
+  const box = $("#dutyPreview");
+  const why = dutyReason();
+  if(why){
+    box.innerHTML = `<div class="notice">${escapeHtml(why)}</div>`;
+    if(!D.enabled || !(D.groups || []).length) return;
+  }
+
+  const base = startOfWeek(today());
+  const days = [];
+  for(let i = 1; i <= 5; i++){
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+  const ts = ymd(today());
+  const head = "<tr><th>종류</th>" + days.map(d => `<th>${DAY_LABEL[d.getDay()]}</th>`).join("") + "</tr>";
+  const rows = (D.groups || []).map(g => {
+    const cells = days.map(d => {
+      const ds = ymd(d);
+      const got = dutyFor(ds);
+      const hit = got ? got.find(x => x.name === g.name) : null;
+      const txt = hit && hit.list.length ? hit.list.map(st => escapeHtml(nameOf(st))).join(", ") : "—";
+      return `<td class="${ds === ts ? "today" : ""}">${txt}</td>`;
+    }).join("");
+    return `<tr><td class="k">${escapeHtml(g.name)}</td>${cells}</tr>`;
+  }).join("");
+  box.innerHTML = `<div class="dprev"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+async function saveDutyField(patch){
+  const D = Object.assign({ enabled:false, start:null, groups:[] }, state.data.duty || {}, patch);
+  await store.save("duty", D);
+  renderDuty();
+  renderDash();
+  await autoSync();
+}
+
+/* ============================================================
+   16. 조회 Dashboard
+   ============================================================ */
+function renderDash(){
+  const d  = today();
+  const ds = ymd(d);
+
+  $("#dashYmd").textContent = ds.replace(/-/g, ". ");
+  $("#dashBig").innerHTML   = `${d.getMonth() + 1}월 ${d.getDate()}일 <em>${DAY_LABEL[d.getDay()]}요일</em>`;
+
+  const n = (state.data.students || []).length;
+  $("#dashSum").textContent = `${state.data.className || ""} · 학생 ${n}명`;
+
+  /* --- 오늘 시간표 --- */
+  const ps  = periodsFor(ds);
+  const box = $("#dashPeriods");
+  if(!isWeekday(d)){
+    box.innerHTML = `<p class="sub">주말입니다. 시간표가 없습니다.</p>`;
+  }else{
+    box.innerHTML = ps.map((p, i) => `
+      <div class="period ${p.changed ? "changed" : ""}">
+        <span class="pn">${i + 1}</span>
+        <span class="ps ${p.value ? "" : "none"}">${p.value ? escapeHtml(p.value) : "—"}</span>
+      </div>`).join("");
+  }
+  $("#ttHead").textContent = (state.data.overrides || {})[ds] ? "오늘 시간표 (변경됨)" : "오늘 시간표";
+
+  /* 오늘만 고치기 편집란 */
+  $("#ovEdit").innerHTML = ps.map((p, i) => `
+    <div class="period">
+      <span class="pn">${i + 1}</span>
+      <input type="text" data-ovp="${i}" data-one="1" value="${escapeHtml(p.value)}" autocomplete="off" style="min-height:40px;">
+    </div>`).join("");
+
+  /* --- 오늘 일정(반복) --- */
+  const recs = (state.data.recurring || []).filter(r => occursOn(r, d));
+  const todayDd = sortedDdays().filter(x => x.date === ds);
+  const tbox = $("#dashToday");
+  if(!recs.length && !todayDd.length){
+    tbox.innerHTML = `<p class="sub">오늘 예정된 일정이 없습니다.</p>`;
+  }else{
+    tbox.innerHTML =
+      recs.map(r => `<div class="item"><span class="tag">${recLabel(r)}</span><span class="ttl">${escapeHtml(r.title)}</span></div>`).join("") +
+      todayDd.map(x => `<div class="item"><span class="dd today">TODAY</span><span class="ttl">${escapeHtml(x.title)}</span></div>`).join("");
+  }
+
+  /* --- 다가오는 D-Day (지난 것은 숨김, 최대 6개) --- */
+  const up = sortedDdays().filter(x => ddayNum(x.date) >= 0).slice(0, 6);
+  $("#dashDday").innerHTML = up.length
+    ? up.map(x => {
+        const b = ddayBadge(ddayNum(x.date));
+        return `<div class="item"><span class="dd ${b.cls}">${b.txt}</span>
+          <span class="ttl">${escapeHtml(x.title)}<br>
+          <span style="font-size:12px; color:var(--ink-45); font-family:var(--font-mono);">${escapeHtml(x.cat)}</span></span></div>`;
+      }).join("")
+    : `<p class="sub">등록된 일정이 없습니다.</p>`;
+
+  /* --- 당번 --- */
+  const duty = dutyFor(ds);
+  $("#dashDuty").innerHTML = (duty && duty.length)
+    ? duty.map(g => `<div class="duty-line">
+        <span class="k">${escapeHtml(g.name)}</span>
+        <span class="v ${g.list.length ? "" : "none"}">${
+          g.list.length ? g.list.map(st => escapeHtml(nameOf(st))).join(", ") : "없음"
+        }</span></div>`).join("")
+    : `<p class="sub">${escapeHtml(dutyReason() || "오늘은 당번이 없습니다. (주말이거나 순환 시작 전입니다)")}</p>`;
+
+  /* --- 체크리스트 / 급식 --- */
+  renderChecklist();
+  renderMeal();
+
+  /* --- 공지 / 메모 --- */
+  $("#taNotice").value = state.data.notice || "";
+  $("#taSupply").value = state.data.supplies || "";
+  $("#taMemo").value   = (state.data.memos || {})[ds] || "";
+}
+
+/* ============================================================
+   16-A. 조회 체크리스트
+   ------------------------------------------------------------
+   · 반복 항목(checklist)은 매일 아침 자동으로 다시 올라온다.
+   · 오늘만 쓰는 항목과 체크 상태는 날짜별로 따로 둔다.
+   ============================================================ */
+function ckToday(){
+  const ds = ymd(today());
+  const d  = (state.data.checkDaily || {})[ds] || {};
+  return { ds, items: d.items || [], done: d.done || {} };
+}
+
+/* 반복 항목 + 오늘 항목을 합쳐 실제로 보여줄 목록을 만든다 */
+function ckAll(){
+  const { items } = ckToday();
+  const pinned = (state.data.checklist || []).map(x => ({ ...x, pin: true }));
+  return [...pinned, ...items.map(x => ({ ...x, pin: false }))];
+}
+
+function renderChecklist(){
+  const { done } = ckToday();
+  const list = ckAll();
+  const box = $("#ckList");
+
+  if(!list.length){
+    box.innerHTML = `<p class="sub">오늘 말할 것을 적어 두면 조회 중에 하나씩 지울 수 있습니다.</p>`;
+    $("#ckBar").classList.add("hidden");
+    return;
+  }
+  $("#ckBar").classList.remove("hidden");
+
+  box.innerHTML = list.map(x => `
+    <label class="ckrow" data-done="${done[x.id] ? 1 : 0}">
+      <input type="checkbox" data-ck="${x.id}" ${done[x.id] ? "checked" : ""}>
+      <span class="t">${escapeHtml(x.text)}</span>
+      ${x.pin ? `<span class="pin">매일</span>` : ""}
+      <button class="x" data-ckdel="${x.id}|${x.pin ? 1 : 0}" aria-label="삭제">×</button>
+    </label>`).join("");
+
+  const n = list.filter(x => done[x.id]).length;
+  $("#ckCount").textContent = `${n}/${list.length}`;
+  $("#ckFill").style.width = list.length ? `${Math.round(n / list.length * 100)}%` : "0";
+
+  if(n === list.length){
+    box.insertAdjacentHTML("beforeend", `<div class="ckdone">오늘 말할 것을 다 전했습니다.</div>`);
+  }
+}
+
+async function ckAdd(){
+  const text = $("#inCkNew").value.trim();
+  if(!text){ toast("내용을 입력해 주세요."); return; }
+  const item = { id: "c" + Date.now().toString(36), text };
+
+  if($("#chkCkPin").checked){
+    await store.save("checklist", [...(state.data.checklist || []), item]);
+  }else{
+    const { ds, items } = ckToday();
+    await store.save(`checkDaily.${ds}.items`, [...items, item]);
+  }
+  $("#inCkNew").value = "";
+  renderChecklist();
+  $("#inCkNew").focus();
+}
+
+async function ckToggle(id, on){
+  const { ds, done } = ckToday();
+  const next = { ...done };
+  if(on) next[id] = true; else delete next[id];
+  await store.save(`checkDaily.${ds}.done`, next);
+  renderChecklist();
+}
+
+async function ckDelete(id, isPin){
+  if(isPin){
+    const ok = await confirmBox({
+      title: "매일 반복 항목을 지웁니다",
+      body: "내일부터 이 항목이 올라오지 않습니다.",
+      ok: "지우기"
+    });
+    if(!ok) return;
+    await store.save("checklist", (state.data.checklist || []).filter(x => x.id !== id));
+  }else{
+    const { ds, items } = ckToday();
+    await store.save(`checkDaily.${ds}.items`, items.filter(x => x.id !== id));
+  }
+  renderChecklist();
+}
+
+/* ============================================================
+   16-B. 급식 (나이스 교육정보 개방 포털)
+   ------------------------------------------------------------
+   공개 자료라 인증키 없이 조회된다. 응답은 하루 단위로 캐시한다.
+   학생 화면도 같은 함수를 쓰므로 서버에 급식을 복제할 필요가 없다.
+   ============================================================ */
+const NEIS = "https://open.neis.go.kr/hub";
+const mealCache = {};   // { "코드_날짜": {dishes, kcal} | null }
+
+async function findSchool(name){
+  const url = `${NEIS}/schoolInfo?Type=json&pSize=8&SCHUL_NM=${encodeURIComponent(name)}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  if(!j.schoolInfo) return [];
+  return (j.schoolInfo[1].row || []).map(x => ({
+    code: x.SD_SCHUL_CODE,
+    office: x.ATPT_OFCDC_SC_CODE,
+    name: x.SCHUL_NM,
+    addr: x.ORG_RDNMA || ""
+  }));
+}
+
+/* 알레르기 번호는 괄호로 따로 떼어 표시한다 */
+function parseDish(raw){
+  return String(raw || "").split(/<br\s*\/?>/i)
+    .map(x => x.trim()).filter(Boolean)
+    .map(x => {
+      const m = x.match(/^(.*?)[\s(]*([\d.\s]+)\)?$/);
+      if(m && m[2] && /\d/.test(m[2])) return { name: m[1].trim(), al: m[2].replace(/\s/g, "") };
+      return { name: x.replace(/[()]/g, "").trim(), al: "" };
+    })
+    .filter(x => x.name);
+}
+
+async function fetchMeal(school, dateStr){
+  if(!school || !school.code) return null;
+  const ymdN = dateStr.replace(/-/g, "");
+  const key = `${school.code}_${ymdN}`;
+  if(key in mealCache) return mealCache[key];
+
+  try{
+    const url = `${NEIS}/mealServiceDietInfo?Type=json&pSize=5`
+      + `&ATPT_OFCDC_SC_CODE=${encodeURIComponent(school.office)}`
+      + `&SD_SCHUL_CODE=${encodeURIComponent(school.code)}`
+      + `&MLSV_YMD=${ymdN}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if(!j.mealServiceDietInfo){ mealCache[key] = null; return null; }
+
+    const rows = j.mealServiceDietInfo[1].row || [];
+    const lunch = rows.find(x => x.MMEAL_SC_CODE === "2") || rows[0];
+    if(!lunch){ mealCache[key] = null; return null; }
+
+    const out = {
+      dishes: parseDish(lunch.DDISH_NM),
+      kcal: (lunch.CAL_INFO || "").trim()
+    };
+    mealCache[key] = out;
+    return out;
+  }catch(e){
+    console.error("급식 불러오기 실패", e);
+    return null;
+  }
+}
+
+function mealHtml(meal){
+  if(!meal || !meal.dishes.length) return `<p class="sub">오늘은 급식 정보가 없습니다.</p>`;
+  return `<div class="meal">${
+    meal.dishes.map(x => `<div class="dish"><span>${escapeHtml(x.name)}</span>${
+      x.al ? `<span class="al">${escapeHtml(x.al)}</span>` : ""
+    }</div>`).join("")
+  }</div>${meal.kcal ? `<div class="kcal">${escapeHtml(meal.kcal)}</div>` : ""}`;
+}
+
+/* 조회 화면 */
+async function renderMeal(){
+  const sc = state.data.school;
+  const card = $("#cardMeal");
+  if(!sc){
+    card.classList.remove("hidden");
+    $("#mealBody").innerHTML = `<p class="sub">관리 화면에서 학교를 고르면 급식이 매일 저절로 뜹니다.</p>`;
+    return;
+  }
+  card.classList.remove("hidden");
+  $("#mealBody").innerHTML = `<p class="sub">불러오는 중…</p>`;
+  const meal = await fetchMeal(sc, ymd(today()));
+  $("#mealBody").innerHTML = mealHtml(meal);
+}
+
+function renderSchoolPanel(){
+  const sc = state.data.school;
+  $("#schoolNow").classList.toggle("hidden", !sc);
+  $("#schoolFind").classList.toggle("hidden", !!sc);
+  if(sc) $("#schoolNowName").textContent = sc.name;
+}
+
+/* ============================================================
+   17. 출석 체크
+   ============================================================ */
+function attStatus(id){
+  const doc = state.attCache[state.attDate];
+  return (doc && doc.students && doc.students[id]) ? doc.students[id].status : "ok";
+}
+
+async function openAttendance(){
+  state.attDate = ymd(today());
+  await store.loadAtt(state.attDate);
+  renderAtt();
+}
+
+function renderAtt(){
+  const ds  = state.attDate;
+  const doc = state.attCache[ds] || { students:{}, closed:false };
+  const students = state.data.students || [];
+
+  $("#attHead").textContent = `${ds.slice(5).replace("-", "월 ")}일 출석`;
+
+  /* 좌석이 배치되어 있으면 좌석표 그대로, 아니면 번호순 격자 */
+  const { rows, cols } = state.data.grid || CONFIG.seat;
+  const seats = state.data.seats || {};
+  const seated = Object.keys(seats).length > 0;
+  const grid = $("#attGrid");
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  let html = "";
+  if(seated){
+    for(let r = rows - 1; r >= 0; r--){
+      for(let c = 0; c < cols; c++){
+        const sid = seats[seatKey(r, c)];
+        const s = sid ? studentById(sid) : null;
+        html += s ? attCell(s) : `<div class="seat empty readonly"></div>`;
+      }
+    }
+    $("#attNoSeat").textContent = "";
+  }else{
+    html = students.map(attCell).join("");
+    $("#attNoSeat").textContent = students.length
+      ? "자리 배치를 하면 실제 교실 모양대로 볼 수 있습니다."
+      : "먼저 관리 화면에서 학생 명단을 등록해 주세요.";
+  }
+  grid.innerHTML = html;
+
+  /* 집계 */
+  let ab = 0, lt = 0;
+  students.forEach(s => {
+    const st = attStatus(s.id);
+    if(st === "absent") ab++;
+    else if(st === "late") lt++;
+  });
+  $("#tallyOk").textContent = students.length - ab - lt;
+  $("#tallyAb").textContent = ab;
+  $("#tallyLt").textContent = lt;
+
+  /* 조회 종료 상태 */
+  $("#btnCloseMeeting").classList.toggle("hidden", !!doc.closed);
+  $("#btnReopen").classList.toggle("hidden", !doc.closed);
+  renderFollow(doc);
+}
+
+function attCell(s){
+  const st  = attStatus(s.id);
+  const cls = st === "absent" ? "absent" : st === "late" ? "late" : "filled";
+  const mk  = st === "absent" ? "결" : st === "late" ? "지" : "";
+  return `<button class="seat ${cls}" data-att="${s.id}">
+    ${mk ? `<span class="mark">${mk}</span>` : ""}
+    <span class="sno">${s.no}</span>
+    <span class="snm">${escapeHtml(nameOf(s))}</span>
+  </button>`;
+}
+
+/* 출석 → 결석 → 지각 → 출석 */
+async function cycleAtt(id){
+  const cur  = attStatus(id);
+  const next = cur === "ok" ? "late" : cur === "late" ? "absent" : "ok";
+  if(next === "ok"){
+    await store.saveAtt(state.attDate, `students.${id}`, null);   // 출석은 기록하지 않음
+  }else{
+    await store.saveAtt(state.attDate, `students.${id}`, { status: next });
+  }
+  renderAtt();
+}
+
+/* 조회 종료 후 '확인 필요' */
+function renderFollow(doc){
+  const card = $("#cardFollow");
+  if(!doc.closed){ card.classList.add("hidden"); return; }
+
+  // PRD: "조회 종료 후 지속적으로 체크되어 있는 학생" — 지각·결석 모두 아직 안 온 상태다
+  const need = (state.data.students || []).filter(s => attStatus(s.id) !== "ok");
+  if(!need.length){
+    card.classList.remove("hidden");
+    $("#followList").innerHTML = `<p class="sub">모두 등교했습니다.</p>`;
+    $("#copyText").textContent = "";
+    $("#btnCopyMsg").disabled = true;
+    return;
+  }
+  card.classList.remove("hidden");
+  $("#btnCopyMsg").disabled = false;
+  $("#followList").innerHTML = need.map(s => `
+    <div class="item">
+      <span class="tag">${attStatus(s.id) === "absent" ? "결석" : "지각"}</span>
+      <span class="ttl">${s.no}번 ${escapeHtml(nameOf(s))}</span>
+    </div>`).join("");
+
+  const cls = state.data.className || "";
+  $("#copyText").textContent = need
+    .map(s => `${cls} ${nameOf(s)} 학생이 현재까지 등교하지 않아 확인이 필요합니다.`)
+    .join("\n");
+}
+
+/* ============================================================
+   18. Stage 2 이벤트 연결
+   ============================================================ */
+
+/* --- 시간표: 화살표 키로 칸 이동 --- */
+/* 위아래는 항상 이동, 좌우는 커서가 글자 끝에 있을 때만 이동한다 */
+function gridMove(box, cur, dRow, dCol, rowAttr, colAttr){
+  const cells = $$("input", box);
+  const cols  = [...new Set(cells.map(x => x.dataset[colAttr]))];
+  const nr = parseInt(cur.dataset[rowAttr], 10) + dRow;
+  const nc = cols.indexOf(cur.dataset[colAttr]) + dCol;
+  if(nc < 0 || nc >= cols.length) return false;
+  const target = cells.find(x =>
+    parseInt(x.dataset[rowAttr], 10) === nr && x.dataset[colAttr] === cols[nc]);
+  if(!target) return false;
+  target.focus();
+  try{ target.setSelectionRange(target.value.length, target.value.length); }catch(e){}
+  return true;
+}
+
+function bindArrowKeys(boxSel, rowAttr, colAttr){
+  const box = $(boxSel);
+  if(!box) return;
+  box.addEventListener("keydown", e => {
+    const el = e.target;
+    if(el.tagName !== "INPUT") return;
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    const atEnd   = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+    let moved = false;
+    if(e.key === "ArrowDown" || e.key === "Enter") moved = gridMove(box, el, 1, 0, rowAttr, colAttr);
+    else if(e.key === "ArrowUp")                   moved = gridMove(box, el, -1, 0, rowAttr, colAttr);
+    else if(e.key === "ArrowRight" && atEnd)       moved = gridMove(box, el, 0, 1, rowAttr, colAttr);
+    else if(e.key === "ArrowLeft"  && atStart)     moved = gridMove(box, el, 0, -1, rowAttr, colAttr);
+    if(moved) e.preventDefault();
+  });
+}
+bindArrowKeys("#ttEdit", "p", "day");     // 기본 시간표: 행=교시, 열=요일
+bindArrowKeys("#ovEdit", "ovp", "one");   // 오늘만 고치기: 한 열
+
+/* --- 시간표 --- */
+$("#btnApplyPeriods").addEventListener("click", async () => {
+  const n = Math.max(1, Math.min(10, parseInt($("#inPeriods").value, 10) || CONFIG.periodsPerDay));
+  await store.save("periods", n);
+  renderTTEdit();
+  renderDash();
+  toast("교시 수를 바꿨습니다. 시간표를 확인하고 저장해 주세요.");
+});
+$("#btnSaveTT").addEventListener("click", saveTimetable);
+
+/* 오늘만 시간표 고치기 */
+$("#btnSaveOv").addEventListener("click", async () => {
+  const ds = ymd(today());
+  const arr = $$("#ovEdit input").map(i => i.value.trim());
+  await store.save(`overrides.${ds}`, arr);
+  renderDash();
+  await autoSync();
+  toast("오늘 시간표를 저장했습니다.");
+});
+$("#btnClearOv").addEventListener("click", async () => {
+  const ds = ymd(today());
+  await store.save(`overrides.${ds}`, null);
+  renderDash();
+  await autoSync();
+  toast("기본 시간표로 되돌렸습니다.");
+});
+
+/* --- 반복 일정 --- */
+$("#selRecFreq").addEventListener("change", e => {
+  $("#wrapRecNth").classList.toggle("hidden", e.target.value !== "monthly");
+  $("#wrapRecAnchor").classList.toggle("hidden", e.target.value !== "biweekly");
+});
+
+$("#btnAddRec").addEventListener("click", async () => {
+  const title = $("#inRecTitle").value.trim();
+  if(!title){ toast("일정 이름을 입력해 주세요."); return; }
+
+  const freq = $("#selRecFreq").value;
+  const rule = {
+    id: "r" + Date.now().toString(36),
+    title,
+    freq,
+    day: parseInt($("#selRecDay").value, 10),
+    nth: parseInt($("#selRecNth").value, 10),
+    anchor: freq === "biweekly" ? ($("#inRecAnchor").value || ymd(today())) : null,
+    skips: []
+  };
+  await store.save("recurring", [...(state.data.recurring || []), rule]);
+  $("#inRecTitle").value = "";
+  renderRecList();
+  renderDash();
+  await autoSync();
+  toast("반복 일정을 추가했습니다.");
+});
+
+$("#recList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-recdel]");
+  if(!b) return;
+  await store.save("recurring", (state.data.recurring || []).filter(r => r.id !== b.dataset.recdel));
+  renderRecList();
+  renderDash();
+  await autoSync();
+});
+
+/* --- D-Day --- */
+$("#btnAddDd").addEventListener("click", async () => {
+  const title = $("#inDdTitle").value.trim();
+  const date  = $("#inDdDate").value;
+  if(!title){ toast("일정 이름을 입력해 주세요."); return; }
+  if(!date){ toast("날짜를 골라 주세요."); return; }
+
+  const item = { id: "d" + Date.now().toString(36), title, date, cat: $("#selDdCat").value };
+  await store.save("ddays", [...(state.data.ddays || []), item]);
+  $("#inDdTitle").value = "";
+  renderDdList();
+  renderDash();
+  await autoSync();
+  toast("일정을 추가했습니다.");
+});
+
+$("#ddList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-dddel]");
+  if(!b) return;
+  await store.save("ddays", (state.data.ddays || []).filter(x => x.id !== b.dataset.dddel));
+  renderDdList();
+  renderDash();
+  await autoSync();
+});
+
+/* --- 당번 --- */
+$("#chkDuty").addEventListener("change", e => {
+  const patch = { enabled: e.target.checked };
+  /* 화면에는 오늘 날짜가 보이지만 값이 저장되지 않아 계산이 건너뛰던 문제를 막는다 */
+  if(e.target.checked && !(state.data.duty || {}).start){
+    patch.start = $("#inDutyStart").value || ymd(today());
+  }
+  saveDutyField(patch);
+});
+$("#inDutyStart").addEventListener("change", e => saveDutyField({ start: e.target.value || ymd(today()) }));
+
+$("#btnAddGroup").addEventListener("click", async () => {
+  const name = $("#inGName").value.trim();
+  if(!name){ toast("당번 이름을 입력해 주세요."); return; }
+  const g = {
+    id: "g" + Date.now().toString(36),
+    name,
+    mode: $("#selGMode").value,
+    per: Math.max(1, Math.min(10, parseInt($("#inGPer").value, 10) || 1)),
+    members: []
+  };
+  $("#inGName").value = "";
+  await saveDutyField({ groups: [...((state.data.duty || {}).groups || []), g] });
+  toast(g.mode === "members" ? "추가했습니다. 「학생 뽑기」로 순서대로 골라 주세요." : "추가했습니다.");
+});
+
+$("#dutyGroups").addEventListener("click", async e => {
+  const del = e.target.closest("[data-gdel]");
+  if(del){
+    const ok = await confirmBox({
+      title: "이 당번을 지웁니다",
+      body: "뽑아둔 학생 목록도 함께 사라집니다.",
+      ok: "지우기"
+    });
+    if(!ok) return;
+    await saveDutyField({ groups: ((state.data.duty || {}).groups || []).filter(g => g.id !== del.dataset.gdel) });
+    return;
+  }
+
+  const pick = e.target.closest("[data-gpick]");
+  if(pick){ toggleGroupPool(pick.dataset.gpick); return; }
+
+  /* 멤버 넣기 / 빼기 — 누른 순서가 요일 순서 */
+  const mem = e.target.closest("[data-gmem]");
+  if(mem){
+    const [gid, sid] = mem.dataset.gmem.split("|");
+    const groups = ((state.data.duty || {}).groups || []).map(g => {
+      if(g.id !== gid) return g;
+      const list = [...(g.members || [])];
+      const i = list.indexOf(sid);
+      if(i >= 0) list.splice(i, 1); else list.push(sid);
+      return { ...g, members: list };
+    });
+    await saveDutyField({ groups });
+    toggleGroupPool(gid, true);   // 다시 그린 뒤 계속 열어 둔다
+  }
+});
+
+/* --- 조회 체크리스트 --- */
+$("#btnCkAdd").addEventListener("click", ckAdd);
+$("#inCkNew").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); ckAdd(); }
+});
+$("#ckList").addEventListener("change", e => {
+  const b = e.target.closest("[data-ck]");
+  if(b) ckToggle(b.dataset.ck, b.checked);
+});
+$("#ckList").addEventListener("click", e => {
+  const d = e.target.closest("[data-ckdel]");
+  if(!d) return;
+  e.preventDefault();
+  const [id, pin] = d.dataset.ckdel.split("|");
+  ckDelete(id, pin === "1");
+});
+
+/* --- 급식: 학교 찾기 --- */
+async function doFindSchool(){
+  const q = $("#inSchool").value.trim();
+  if(q.length < 2){ toast("학교 이름을 두 글자 이상 입력해 주세요."); return; }
+  $("#schoolList").innerHTML = `<p class="sub">찾는 중…</p>`;
+  try{
+    const list = await findSchool(q);
+    if(!list.length){
+      $("#schoolList").innerHTML = `<p class="sub">찾지 못했습니다. 정확한 학교 이름으로 다시 시도해 주세요.</p>`;
+      return;
+    }
+    $("#schoolList").innerHTML = list.map(x =>
+      `<button data-school="${escapeHtml(x.office)}|${escapeHtml(x.code)}|${escapeHtml(x.name)}">
+        <b>${escapeHtml(x.name)}</b><span>${escapeHtml(x.addr)}</span>
+      </button>`).join("");
+  }catch(e){
+    console.error(e);
+    $("#schoolList").innerHTML = `<p class="sub">지금은 학교 정보를 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.</p>`;
+  }
+}
+$("#btnSchoolFind").addEventListener("click", doFindSchool);
+$("#inSchool").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); doFindSchool(); }
+});
+
+$("#schoolList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-school]");
+  if(!b) return;
+  const [office, code, name] = b.dataset.school.split("|");
+  await store.save("school", { office, code, name });
+  $("#schoolList").innerHTML = "";
+  $("#inSchool").value = "";
+  renderSchoolPanel();
+  renderMeal();
+  await autoSync();
+  toast(`${name} 급식을 불러옵니다.`);
+});
+
+$("#btnSchoolClear").addEventListener("click", async () => {
+  await store.save("school", null);
+  renderSchoolPanel();
+  renderMeal();
+  await autoSync();
+});
+
+/* --- 공지 / 메모 --- */
+$("#btnSaveNotes").addEventListener("click", async () => {
+  const ds = ymd(today());
+  await store.save("notice", $("#taNotice").value.trim());
+  await store.save("supplies", $("#taSupply").value.trim());
+  await store.save(`memos.${ds}`, $("#taMemo").value.trim());
+  await autoSync();
+  toast("저장했습니다.");
+});
+
+/* --- 출석 --- */
+$("#attGrid").addEventListener("click", e => {
+  const b = e.target.closest("[data-att]");
+  if(b) cycleAtt(b.dataset.att);
+});
+
+$("#btnCloseMeeting").addEventListener("click", async () => {
+  await store.saveAtt(state.attDate, "closed", true);
+  renderAtt();
+  const need = (state.data.students || []).filter(s => attStatus(s.id) !== "ok").length;
+  toast(need ? `확인이 필요한 학생 ${need}명이 있습니다.` : "모두 등교했습니다.");
+});
+
+$("#btnReopen").addEventListener("click", async () => {
+  await store.saveAtt(state.attDate, "closed", false);
+  renderAtt();
+});
+
+$("#btnCopyMsg").addEventListener("click", async () => {
+  const text = $("#copyText").textContent;
+  if(!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    toast("문구를 복사했습니다.");
+  }catch(e){
+    // 클립보드를 쓸 수 없는 환경 대비
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    toast("문구를 복사했습니다.");
+  }
+});
+
+/* ============================================================
+   18-A. 관리 탭 카드 접기
+   ------------------------------------------------------------
+   카드가 많아 스크롤이 길다. 제목만 남기고 접을 수 있게 한다.
+   펼친 상태는 기기에 기억한다.
+   ============================================================ */
+const K_FOLD = "mca_fold";
+
+function setupFolds(){
+  const saved = LS.get(K_FOLD) || {};
+
+  $$("#tab-manage > .card").forEach((card, i) => {
+    if(card.classList.contains("fold")) return;          // 이미 처리했으면 넘어간다
+    const h2 = card.querySelector("h2");
+    if(!h2) return;
+
+    const eyebrow = card.querySelector(".eyebrow");
+    const key = h2.textContent.trim();
+
+    const head = document.createElement("div");
+    head.className = "cardhead";
+    const ht = document.createElement("div");
+    ht.className = "ht";
+    if(eyebrow) ht.appendChild(eyebrow);
+    ht.appendChild(h2);
+    const chev = document.createElement("span");
+    chev.className = "hc";
+
+    head.appendChild(ht);
+    head.appendChild(chev);
+
+    const body = document.createElement("div");
+    body.className = "cardbody";
+    while(card.firstChild) body.appendChild(card.firstChild);
+    card.appendChild(head);
+    card.appendChild(body);
+
+    card.classList.add("fold");
+    card.dataset.foldKey = key;
+    card.dataset.open = saved[key] === undefined ? (i === 1 ? "1" : "0") : (saved[key] ? "1" : "0");
+    chev.textContent = card.dataset.open === "1" ? "▾" : "▸";
+
+    head.addEventListener("click", () => {
+      const open = card.dataset.open === "1";
+      card.dataset.open = open ? "0" : "1";
+      chev.textContent = open ? "▸" : "▾";
+      const st = LS.get(K_FOLD) || {};
+      st[key] = !open;
+      LS.set(K_FOLD, st);
+    });
+  });
+
+  if(!$("#foldBar")){
+    const bar = document.createElement("div");
+    bar.className = "foldbar";
+    bar.id = "foldBar";
+    bar.innerHTML =
+      `<button class="btn ghost" data-fold-all="1">모두 펼치기</button>` +
+      `<button class="btn ghost" data-fold-all="0">모두 접기</button>`;
+    $("#tab-manage").prepend(bar);
+    bar.addEventListener("click", e => {
+      const b = e.target.closest("[data-fold-all]");
+      if(!b) return;
+      const open = b.dataset.foldAll === "1";
+      const st = {};
+      $$("#tab-manage > .card.fold").forEach(card => {
+        card.dataset.open = open ? "1" : "0";
+        const c = card.querySelector(".hc");
+        if(c) c.textContent = open ? "▾" : "▸";
+        st[card.dataset.foldKey] = open;
+      });
+      LS.set(K_FOLD, st);
+    });
+  }
+}
+
+/* ============================================================
+   19. 사용 방식 (저장 위치 x 이름 사용)
+   ------------------------------------------------------------
+   화면에는 프리셋 3개만 보이지만 내부는 두 스위치의 조합이다.
+     cloud  + real   → 학교 승인 후 동기화
+     local  + real   → 내 기기에서만
+     local  + number → 번호만 사용
+   나중에 "번호만 쓰면서 동기화" 같은 요구가 와도 코드는 그대로다.
+   ============================================================ */
+const PRESETS = {
+  cloud:  { mode:"cloud", nameMode:"real"   },
+  local:  { mode:"local", nameMode:"real"   },
+  number: { mode:"local", nameMode:"number" }
+};
+
+function saveSetup(){
+  LS.set(K_SETUP, { mode: state.mode, nameMode: state.nameMode });
+}
+function loadSetup(){
+  const v = LS.get(K_SETUP);
+  if(!v) return false;
+  state.mode     = v.mode     || "local";
+  state.nameMode = v.nameMode || "real";
+  return true;
+}
+
+function numberDisplay(s){
+  return s.sid ? String(s.sid) : `${s.no}번`;
+}
+
+function modeLabel(){
+  const a = state.mode === "cloud" ? "서버 동기화" : state.mode === "demo" ? "둘러보기" : "이 기기에만";
+  const b = state.nameMode === "number" ? "번호만" : "실명(암호화)";
+  return { a, b };
+}
+
+function renderModePanel(){
+  const { a, b } = modeLabel();
+  $("#modeTxt").textContent = `${a} · ${b}`;
+  $("#modeSub").textContent = state.mode === "cloud" ? "결재·동의 필요" : "서버 전송 없음";
+  $("#modeState").dataset.s = state.mode === "cloud" ? "open" : "locked";
+
+  $$("#bkToggles .toggle").forEach(el => {
+    const on = el.dataset.k === state.mode;
+    el.dataset.on = on ? "1" : "0";
+    $("input", el).checked = on;
+  });
+  $$("#nmToggles .toggle").forEach(el => {
+    const on = el.dataset.k === state.nameMode;
+    el.dataset.on = on ? "1" : "0";
+    $("input", el).checked = on;
+  });
+
+  /* 번호만 쓰는 경우 이름 보호 카드는 의미가 없다 */
+  $("#cardLock").classList.toggle("hidden", state.nameMode === "number");
+  $("#numberEntry").classList.toggle("hidden", state.nameMode !== "number");
+}
+
+/* ---------- 저장 위치 바꾸기 ---------- */
+async function switchBackend(next){
+  if(next === state.mode){ renderModePanel(); return; }
+
+  if(next === "local"){
+    const ok = await confirmBox({
+      title: "이 기기에만 저장합니다",
+      body: "지금 자료를 이 기기로 옮깁니다. 서버에 있던 자료는 그대로 남아 있으니, 필요하면 나중에 정리하세요.",
+      ok: "옮기기"
+    });
+    if(!ok){ renderModePanel(); return; }
+    state.mode = "local";
+    LS.set(K_CLASS, state.data);
+    Object.keys(state.attCache).forEach(d => LS.set(K_ATT + d, state.attCache[d]));
+    saveSetup();
+    renderAll();
+    toast("이제 이 기기에만 저장합니다.");
+    return;
+  }
+
+  /* local → cloud 는 로그인이 필요하다. 억지로 이어붙이지 않고 안내한다. */
+  await confirmBox({
+    title: "서버 동기화로 바꾸려면",
+    body: "먼저 이 화면에서 「파일로 내보내기」를 하시고, Firebase 설정을 넣은 뒤 구글 로그인해서 그 파일을 가져오세요. 중간에 자료가 섞이지 않도록 이 순서를 권합니다.",
+    ok: "알겠습니다", cancel: "닫기"
+  });
+  renderModePanel();
+}
+
+/* ---------- 이름 사용 방식 바꾸기 ---------- */
+async function switchNameMode(next){
+  if(next === state.nameMode){ renderModePanel(); return; }
+
+  if(next === "number"){
+    const ok = await confirmBox({
+      title: "이름을 지웁니다",
+      body: "저장된 학생 이름을 모두 지우고 번호로만 운영합니다. 되돌릴 수 없습니다. 번호와 자리, 출결 기록은 그대로 남습니다.",
+      ok: "이름 지우기"
+    });
+    if(!ok){ renderModePanel(); return; }
+
+    const list = (state.data.students || []).map(st => {
+      const o = { ...st };
+      delete o.nameEnc;
+      delete o.name;
+      o.displayName = numberDisplay(o);
+      return o;
+    });
+    state.nameMode = "number";
+    state.names = {};
+    lockNow();
+    await store.save("students", list);
+    await store.save("nameSalt", null);
+    await store.save("nameVerify", null);
+    saveSetup();
+    await autoSync();
+    renderAll();
+    toast("번호만 사용하도록 바꿨습니다.");
+    return;
+  }
+
+  /* number → real */
+  state.nameMode = "real";
+  saveSetup();
+  renderAll();
+  toast("실명 모드로 바꿨습니다. 이름 보호 암호를 설정해 주세요.");
+}
+
+/* ============================================================
+   20. 파일로 내보내기 / 가져오기
+   ------------------------------------------------------------
+   파일 안의 이름은 이미 암호문(nameEnc)이지만, 출결 기록까지 함께
+   담기므로 기본값으로 파일 전체에 한 번 더 자물쇠를 건다.
+   ============================================================ */
+function buildBackup(){
+  return {
+    app: "MCA", v: 1,
+    exportedAt: new Date().toISOString(),
+    nameMode: state.nameMode,
+    klass: state.data,
+    attendance: { ...state.attCache }
+  };
+}
+
+async function doExport(){
+  const payload = buildBackup();
+  const wantEnc = $("#chkEncExport").checked && state.nameMode === "real" && crypt.key && state.data.nameSalt;
+
+  let out, name;
+  if(wantEnc){
+    const blob = await crypt.enc(JSON.stringify(payload));
+    out  = { app:"MCA", v:1, enc:true, salt: state.data.nameSalt, blob };
+    name = `Johoe_백업_${ymd(today())}_잠김.json`;
+  }else{
+    out  = payload;
+    name = `Johoe_백업_${ymd(today())}.json`;
+  }
+
+  const url = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type:"application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(wantEnc ? "암호를 걸어 내보냈습니다." : "파일로 내보냈습니다.");
+}
+
+/* 파일 내용을 실제 상태로 되살린다 */
+async function restoreBackup(raw){
+  let data = raw;
+
+  if(raw && raw.enc){
+    const pw = prompt("이 파일은 암호가 걸려 있습니다. 암호를 입력해 주세요.");
+    if(!pw) return false;
+    try{
+      crypt.key = await crypt.derive(pw, raw.salt);
+      data = JSON.parse(await crypt.dec(raw.blob));
+    }catch(e){
+      crypt.key = null;
+      toast("암호가 맞지 않거나 파일이 손상되었습니다.");
+      return false;
+    }
+  }
+
+  if(!data || data.app !== "MCA" || !data.klass){
+    toast("이 앱에서 내보낸 파일이 아닙니다.");
+    return false;
+  }
+
+  state.nameMode = data.nameMode || "real";
+  state.data     = Object.assign(emptyClassDoc(state.uid || "local"), data.klass);
+  state.attCache = data.attendance || {};
+
+  if(state.mode === "local"){
+    LS.set(K_CLASS, state.data);
+    Object.keys(state.attCache).forEach(d => LS.set(K_ATT + d, state.attCache[d]));
+  }else{
+    for(const [k, v] of Object.entries(state.data)) await store.save(k, v);
+  }
+  saveSetup();
+
+  /* 암호가 이미 풀린 상태라면 이름도 바로 되살린다 */
+  if(state.nameMode === "real" && crypt.key && state.data.nameVerify){
+    try{
+      if(await crypt.dec(state.data.nameVerify) === VERIFY_TEXT) await decryptRoster();
+      else crypt.key = null;
+    }catch(e){ crypt.key = null; }
+  }
+  return true;
+}
+
+async function readJsonFile(file){
+  try{ return JSON.parse(await file.text()); }
+  catch(e){ toast("파일을 읽지 못했습니다."); return null; }
+}
+
+/* ============================================================
+   21. 번호만 사용할 때의 명단
+   ============================================================ */
+async function makeNumbers(){
+  const to = Math.max(1, Math.min(60, parseInt($("#inMakeTo").value, 10) || 28));
+  if((state.data.students || []).length){
+    const ok = await confirmBox({
+      title: "명단을 새로 만듭니다",
+      body: "지금 명단과 자리 배치가 사라지고 1번부터 다시 만들어집니다.",
+      ok: "새로 만들기"
+    });
+    if(!ok) return;
+  }
+  const list = [];
+  for(let i = 1; i <= to; i++){
+    list.push({ id: "s" + String(i).padStart(2, "0"), no: i, displayName: `${i}번` });
+  }
+  await store.save("students", list);
+  await store.save("seats", {});
+  state.names = {};
+  await autoSync();
+  renderAll();
+  toast(`1번부터 ${to}번까지 만들었습니다.`);
+}
+
+async function parseSids(){
+  const lines = $("#taSids").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  if(!lines.length){ toast("학번을 붙여넣어 주세요."); return; }
+
+  const list = lines.map((sid, i) => ({
+    id: "s" + String(i + 1).padStart(2, "0"),
+    no: i + 1,
+    sid,
+    displayName: sid
+  }));
+  const ok = await confirmBox({
+    title: `${list.length}개를 등록합니다`,
+    body: "기존 명단과 자리 배치는 사라집니다. 계속할까요?",
+    ok: "등록"
+  });
+  if(!ok) return;
+
+  await store.save("students", list);
+  await store.save("seats", {});
+  state.names = {};
+  $("#taSids").value = "";
+  await autoSync();
+  renderAll();
+  toast("학번을 등록했습니다.");
+}
+
+/* ============================================================
+   22. 학생 화면 — 공개 문서 만들기
+   ------------------------------------------------------------
+   ★ 설계 원칙
+     학생 화면은 public/{classId} 문서 하나만 읽습니다.
+     이 문서에는 학생 이름·자리·출결이 구조적으로 들어갈 수 없습니다.
+     아래 buildPublicDoc() 이 그 경계선입니다. 여기에 없는 값은
+     학생 쪽에서 절대 볼 수 없습니다.
+
+     시간표·일정·당번은 '계산된 결과'가 아니라 '규칙'을 넘깁니다.
+     그래야 날짜가 바뀔 때마다 다시 올리지 않아도 됩니다.
+   ============================================================ */
+async function sha256(text){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function buildPublicDoc(){
+  const P = state.data.publicSettings || {};
+  const D = state.data.duty || {};
+
+  const doc = {
+    classId: state.classId,
+    className: state.data.className || "",
+    show: {
+      timetable: !!P.timetable, schedule: !!P.schedule, dday: !!P.dday,
+      supplies:  !!P.supplies,  notice:   !!P.notice,   duty: !!P.duty
+    },
+    passwordHash: state.data.passwordHash || null,
+    updatedAt: new Date().toISOString()
+  };
+
+  if(P.timetable){
+    doc.periods   = state.data.periods || CONFIG.periodsPerDay;
+    doc.timetable = state.data.timetable || {};
+    doc.overrides = state.data.overrides || {};
+  }
+  if(P.schedule){
+    doc.recurring = (state.data.recurring || [])
+      .map(r => ({ title:r.title, freq:r.freq, day:r.day, nth:r.nth, anchor:r.anchor, skips:r.skips || [] }));
+  }
+  if(P.dday){
+    doc.ddays = (state.data.ddays || []).map(x => ({ title:x.title, date:x.date, cat:x.cat }));
+  }
+  if(P.meal && state.data.school){
+    /* 급식 내용이 아니라 학교 코드만 넘긴다. 학생 브라우저가 직접 불러온다. */
+    doc.school = { office: state.data.school.office, code: state.data.school.code };
+  }
+  if(P.supplies) doc.supplies = state.data.supplies || "";
+  if(P.notice)   doc.notice   = state.data.notice   || "";
+  if(P.duty && D.enabled){
+    /* ★ 이름은 넘기지 않는다. 출석번호만 넘겨 학생 쪽에서 같은 식으로 계산한다. */
+    const noOf = id => { const st = studentById(id); return st ? st.no : null; };
+    doc.duty = {
+      enabled: true,
+      start: D.start,
+      allNos: [...(state.data.students || [])].sort((x, y) => x.no - y.no).map(st => st.no),
+      groups: (D.groups || []).map(g => ({
+        name: g.name, mode: g.mode, per: g.per || 1,
+        nos: g.mode === "members" ? (g.members || []).map(noOf).filter(n => n !== null) : []
+      }))
+    };
+  }
+  return doc;
+}
+
+async function syncPublic(silent){
+  const doc = buildPublicDoc();
+  try{
+    await store.savePublic(doc);
+    await store.save("published", true);
+    await store.save("publishedAt", doc.updatedAt);
+    renderPublicPanel();
+    if(!silent) toast("학생 화면에 반영했습니다.");
+  }catch(e){
+    console.error(e);
+    toast("반영하지 못했습니다. 인터넷 연결을 확인해 주세요.");
+  }
+}
+
+/* 이미 공개 중일 때만 조용히 다시 올립니다 (교사가 매번 누르지 않아도 되게) */
+async function autoSync(){
+  if(state.data.published) await syncPublic(true);
+}
+
+function studentUrl(){
+  const base = location.origin + location.pathname;
+  return `${base}#/s/${state.classId}`;
+}
+
+function renderPublicPanel(){
+  const P = state.data.publicSettings || {};
+  $$("#pubToggles .toggle").forEach(el => {
+    const k = el.dataset.k;
+    const on = !!P[k];
+    el.dataset.on = on ? "1" : "0";
+    $("input", el).checked = on;
+  });
+
+  const line = $("#syncLine");
+  if(state.data.published){
+    line.className = "syncline on";
+    const t = state.data.publishedAt ? new Date(state.data.publishedAt) : null;
+    $("#syncTxt").textContent = t
+      ? `공개 중 · ${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")} 반영`
+      : "공개 중";
+  }else{
+    line.className = "syncline off";
+    $("#syncTxt").textContent = "아직 반영하지 않았습니다";
+  }
+
+  const cloud = state.mode === "cloud";
+  $("#pubLocalNote").classList.toggle("hidden", cloud);
+  $("#btnSyncPublic").disabled = !cloud;
+  $("#btnUnpublish").disabled  = !cloud;
+  $("#btnCopyLink").disabled   = !cloud;
+
+  const url = studentUrl();
+  $("#pubLink").textContent = (cloud && state.data.published) ? url : "서버 동기화에서 사용할 수 있습니다";
+
+  // QR
+  const box = $("#qrBox");
+  box.innerHTML = "";
+  if(state.data.published && typeof QRCode !== "undefined"){
+    const cv = document.createElement("canvas");
+    box.appendChild(cv);
+    QRCode.toCanvas(cv, url, { width: 168, margin: 1, color: { dark:"#1C2B45", light:"#ffffff" } },
+      err => { if(err) box.innerHTML = `<p class="sub">QR을 만들지 못했습니다.</p>`; });
+  }
+}
+
+/* ============================================================
+   23. 학생 화면 그리기
+   ------------------------------------------------------------
+   교사 화면과 같은 계산식을 쓰지만, 재료가 public 문서로 제한됩니다.
+   ============================================================ */
+function renderStudent(pub, mount){
+  const root = mount || document;
+  const d  = today();
+  const ds = ymd(d);
+
+  const $s = sel => root.querySelector(sel);
+
+  $s("#stTitle").textContent = pub.className || "우리 반";
+  $s("#stDate").textContent  = `${d.getMonth() + 1}. ${d.getDate()} (${DAY_LABEL[d.getDay()]})`;
+
+  const show = pub.show || {};
+
+  /* --- 시간표 --- */
+  $s("#stCardTT").classList.toggle("hidden", !show.timetable);
+  if(show.timetable){
+    const n    = pub.periods || 7;
+    const base = (pub.timetable || {})[DAY_KEY[d.getDay()]] || [];
+    const ov   = (pub.overrides || {})[ds] || null;
+    $s("#stTTHead").textContent = ov ? "오늘 시간표 (변경됨)" : "오늘 시간표";
+
+    if(!isWeekday(d)){
+      $s("#stPeriods").innerHTML = `<p class="sub">주말입니다. 푹 쉬세요.</p>`;
+    }else{
+      let html = "";
+      for(let i = 0; i < n; i++){
+        const b = (base[i] || "").trim();
+        const v = ov ? (ov[i] || "").trim() : b;
+        const changed = ov ? (v !== b) : false;
+        html += `<div class="period ${changed ? "changed" : ""}">
+          <span class="pn">${i + 1}</span>
+          <span class="ps ${v ? "" : "none"}">${v ? escapeHtml(v) : "—"}</span></div>`;
+      }
+      $s("#stPeriods").innerHTML = html;
+    }
+  }
+
+  /* --- 오늘 일정 --- */
+  $s("#stCardToday").classList.toggle("hidden", !show.schedule);
+  if(show.schedule){
+    const recs = (pub.recurring || []).filter(r => occursOn(r, d));
+    $s("#stToday").innerHTML = recs.length
+      ? recs.map(r => `<div class="item"><span class="tag">${recLabel(r)}</span><span class="ttl">${escapeHtml(r.title)}</span></div>`).join("")
+      : `<p class="sub">오늘은 특별한 일정이 없습니다.</p>`;
+  }
+
+  /* --- D-Day --- */
+  $s("#stCardDday").classList.toggle("hidden", !show.dday);
+  if(show.dday){
+    const up = [...(pub.ddays || [])]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .filter(x => ddayNum(x.date) >= 0).slice(0, 8);
+    $s("#stDday").innerHTML = up.length
+      ? up.map(x => {
+          const b = ddayBadge(ddayNum(x.date));
+          return `<div class="item"><span class="dd ${b.cls}">${b.txt}</span>
+            <span class="ttl">${escapeHtml(x.title)}<br>
+            <span style="font-size:12px; color:var(--ink-45); font-family:var(--font-mono);">${x.date} · ${escapeHtml(x.cat)}</span>
+            </span></div>`;
+        }).join("")
+      : `<p class="sub">다가오는 일정이 없습니다.</p>`;
+  }
+
+  /* --- 급식 --- */
+  const canMeal = show.meal && pub.school && pub.school.code;
+  $s("#stCardMeal").classList.toggle("hidden", !canMeal);
+  if(canMeal){
+    $s("#stMeal").innerHTML = `<p class="sub">불러오는 중…</p>`;
+    fetchMeal(pub.school, ds).then(m => {
+      if(!m || !m.dishes.length) $s("#stCardMeal").classList.add("hidden");
+      else $s("#stMeal").innerHTML = mealHtml(m);
+    });
+  }
+
+  /* --- 준비물 --- */
+  const sup = (pub.supplies || "").trim();
+  $s("#stCardSupply").classList.toggle("hidden", !(show.supplies && sup));
+  if(show.supplies && sup) $s("#stSupply").textContent = sup;
+
+  /* --- 공지 --- */
+  const nt = (pub.notice || "").trim();
+  $s("#stCardNotice").classList.toggle("hidden", !(show.notice && nt));
+  if(show.notice && nt) $s("#stNotice").textContent = nt;
+
+  /* --- 당번 (번호만) --- */
+  const DU = pub.duty;
+  const canDuty = show.duty && DU && DU.enabled && (DU.groups || []).length && isWeekday(d);
+  $s("#stCardDuty").classList.toggle("hidden", !canDuty);
+  if(canDuty){
+    const idx = dutyIndex(ds, DU.start);
+    if(idx < 0){
+      $s("#stCardDuty").classList.add("hidden");
+    }else{
+      const groups = (DU.groups || []).map(g => ({ name:g.name, mode:g.mode, per:g.per, pool: g.nos || [] }));
+      const got = assignDuty(idx, DU.allNos || [], groups);
+      $s("#stDuty").innerHTML = got.map(g => `
+        <div class="duty-line"><span class="k">${escapeHtml(g.name)}</span>
+        <span class="v ${g.list.length ? "" : "none"}">${
+          g.list.length ? g.list.map(n => `${n}번`).join(", ") : "없음"
+        }</span></div>`).join("");
+    }
+  }
+
+  const t = pub.updatedAt ? new Date(pub.updatedAt) : null;
+  $s("#stFoot").textContent = t
+    ? `마지막 업데이트 ${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`
+    : "";
+}
+
+/* ============================================================
+   24. 학생 화면 진입 (#/s/{반ID})
+   ============================================================ */
+async function openStudentRoute(classId){
+  $("#screen-login").classList.add("hidden");
+  $("#screen-app").classList.add("hidden");
+  $("#screen-student").classList.remove("hidden");
+  document.body.style.paddingBottom = "0";
+
+  let pub = null;
+  if(firebaseConfigured()){
+    try{
+      const [{ initializeApp }, dbMod] = await Promise.all([
+        import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
+        import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`)
+      ]);
+      const app = initializeApp(CONFIG.firebase);
+      const db  = dbMod.getFirestore(app);
+      state.mode = "cloud";
+      store.setFirebase({
+        db, doc: dbMod.doc, setDoc: dbMod.setDoc, getDoc: dbMod.getDoc,
+        deleteDoc: dbMod.deleteDoc, deleteField: dbMod.deleteField
+      });
+      pub = await store.loadPublic(classId);
+    }catch(e){ console.error(e); }
+  }
+
+  if(!pub){
+    $("#studentGate").classList.remove("hidden");
+    $("#studentGate").innerHTML =
+      `<div class="lock">📄</div><h2>아직 준비 중입니다</h2>
+       <p>선생님이 화면을 올리면 여기에서 볼 수 있습니다.</p>`;
+    return;
+  }
+
+  const enter = () => {
+    $("#studentGate").classList.add("hidden");
+    $("#studentBody").classList.remove("hidden");
+    renderStudent(pub);
+  };
+
+  if(!pub.passwordHash){ enter(); return; }
+
+  $("#studentGate").classList.remove("hidden");
+  const tryPw = async () => {
+    const v = $("#inGate").value.trim();
+    if(!v) return;
+    if(await sha256(v) === pub.passwordHash) enter();
+    else { toast("비밀번호가 맞지 않습니다."); $("#inGate").value = ""; $("#inGate").focus(); }
+  };
+  $("#btnGate").addEventListener("click", tryPw);
+  $("#inGate").addEventListener("keydown", e => { if(e.key === "Enter") tryPw(); });
+}
+
+/* ============================================================
+   25. 사용 방식·백업·학생 화면 이벤트
+   ============================================================ */
+
+/* 공개 항목 토글 */
+$("#pubToggles").addEventListener("change", async e => {
+  const k = e.target.dataset.pub;
+  if(!k) return;
+  const P = { ...(state.data.publicSettings || {}) };
+  P[k] = e.target.checked;
+  await store.save("publicSettings", P);
+  renderPublicPanel();
+  await autoSync();
+});
+
+/* 반영 / 내리기 */
+$("#btnSyncPublic").addEventListener("click", async () => {
+  const pw = $("#inPw").value.trim();
+  await store.save("passwordHash", pw ? await sha256(pw) : null);
+  await syncPublic();
+});
+
+$("#btnUnpublish").addEventListener("click", async () => {
+  const ok = await confirmBox({
+    title: "학생 화면을 내립니다",
+    body: "학생들이 더 이상 화면을 볼 수 없게 됩니다. 반 정보는 그대로 남습니다.",
+    ok: "내리기"
+  });
+  if(!ok) return;
+  await store.deletePublic();
+  await store.save("published", false);
+  renderPublicPanel();
+  toast("학생 화면을 내렸습니다.");
+});
+
+/* 링크 복사 */
+$("#btnCopyLink").addEventListener("click", async () => {
+  if(!state.data.published){ toast("먼저 학생 화면에 반영해 주세요."); return; }
+  try{
+    await navigator.clipboard.writeText(studentUrl());
+    toast("주소를 복사했습니다.");
+  }catch(e){ toast("주소를 길게 눌러 복사해 주세요."); }
+});
+
+/* 미리보기 — 실제로 올라갈 문서 그대로 그립니다 */
+$("#btnPreview").addEventListener("click", () => {
+  const pub = buildPublicDoc();
+  const clone = $("#screen-student").cloneNode(true);
+  clone.id = "previewStudent";
+  clone.classList.remove("hidden");
+  $("#studentGate", clone).classList.add("hidden");
+  $("#studentBody", clone).classList.remove("hidden");
+
+  const mount = $("#previewMount");
+  mount.innerHTML = "";
+  mount.appendChild(clone);
+  renderStudent(pub, clone);
+  $("#previewLayer").classList.remove("hidden");
+});
+$("#btnClosePreview").addEventListener("click", () => {
+  $("#previewLayer").classList.add("hidden");
+  $("#previewMount").innerHTML = "";
+});
+
+/* 학년도 초기화 */
+$("#btnResetYear").addEventListener("click", async () => {
+  const ok1 = await confirmBox({
+    title: "모두 지웁니다",
+    body: "명단, 자리, 시간표, 일정, 출결 기록이 모두 사라집니다. 되돌릴 수 없습니다.",
+    ok: "계속"
+  });
+  if(!ok1) return;
+  const ok2 = await confirmBox({
+    title: "정말 지울까요?",
+    body: "이 작업은 취소할 수 없습니다. 필요한 기록은 미리 따로 남겨 두세요.",
+    ok: "지우기"
+  });
+  if(!ok2) return;
+
+  const fresh = emptyClassDoc(state.uid);
+  for(const [k, v] of Object.entries(fresh)) await store.save(k, v);
+  try{ await store.deletePublic(); }catch(e){}
+  state.attCache = {};
+  lockNow();
+  renderAll();
+  switchTab("manage");
+  toast("새 학년도로 초기화했습니다.");
+});
+
+/* ============================================================
+   26. 개인정보 처리방침 / 이용약관
+   ============================================================ */
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-legal]");
+  if(!a) return;
+  e.preventDefault();
+  const which = a.dataset.legal;
+  $("#legalTitle").textContent = which === "terms" ? "이용약관" : "개인정보 처리방침";
+  $("#docPrivacy").classList.toggle("hidden", which !== "privacy");
+  $("#docTerms").classList.toggle("hidden", which !== "terms");
+  $("#legalLayer").classList.remove("hidden");
+  $("#legalLayer").scrollTop = 0;
+});
+$("#btnCloseLegal").addEventListener("click", () => {
+  $("#legalLayer").classList.add("hidden");
+});
+
+/* ============================================================
+   27. 시작 지점
+   ------------------------------------------------------------
+   ① 주소에 #/s/{반ID} 가 있으면 학생 화면
+   ② 사용 방식이 정해져 있지 않으면 선택 화면
+   ③ 서버 동기화면 로그인 화면, 이 기기 저장이면 바로 시작
+   ============================================================ */
+function showOnly(id){
+  ["screen-intro","screen-setup","screen-login","screen-app","screen-student"].forEach(x => {
+    const el = document.getElementById(x);
+    if(el) el.classList.toggle("hidden", x !== id);
+  });
+}
+
+async function startLocal(){
+  state.uid     = "local";
+  state.classId = "local";
+  const saved = LS.get(K_CLASS);
+  state.data = Object.assign(emptyClassDoc("local"), saved || {});
+  migrateDuty();
+  if(!saved) LS.set(K_CLASS, state.data);
+
+  /* 이 기기에 열쇠를 기억해 둔 경우 잠금을 자동으로 푼다 */
+  if(state.nameMode === "real" && state.data.nameVerify && await recallKey()){
+    try{
+      if(await crypt.dec(state.data.nameVerify) === VERIFY_TEXT) await decryptRoster();
+      else { crypt.key = null; forgetKey(); }
+    }catch(e){ crypt.key = null; forgetKey(); }
+  }
+  enterApp();
+}
+
+/* ---------- 소개 페이지 ---------- */
+const K_SEEN = "mca_seen_intro";
+
+function openIntro(){
+  showOnly("screen-intro");
+  LS.set(K_SEEN, true);
+  document.body.style.paddingBottom = "0";
+  window.scrollTo({ top: 0 });
+}
+
+/* 소개에서 「바로 시작하기」 — 이미 방식을 정해 둔 사람은 곧장 앱으로 */
+function goStart(){
+  document.body.style.paddingBottom = "";
+  if(loadSetup()){
+    if(state.mode === "cloud"){
+      showOnly("screen-login");
+      if(!firebaseConfigured()){
+        $("#btnGoogle").disabled = true;
+        $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
+      }
+    }else{
+      startLocal();
+    }
+  }else{
+    showOnly("screen-setup");
+  }
+  window.scrollTo({ top: 0 });
+}
+
+document.addEventListener("click", e => {
+  const open = e.target.closest("[data-intro-open]");
+  if(open){ e.preventDefault(); openIntro(); return; }
+
+  const b = e.target.closest("[data-intro]");
+  if(!b) return;
+  if(b.dataset.intro === "demo"){
+    document.body.style.paddingBottom = "";
+    startDemo();
+  }else{
+    goStart();
+  }
+});
+
+function choosePreset(name){
+  const p = PRESETS[name];
+  if(!p) return;
+  state.mode     = p.mode;
+  state.nameMode = p.nameMode;
+  saveSetup();
+
+  if(state.mode === "cloud"){
+    showOnly("screen-login");
+    if(!firebaseConfigured()){
+      $("#btnGoogle").disabled = true;
+      $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
+    }
+  }else{
+    startLocal();
+  }
+}
+
+$$('.pick[data-preset]').forEach(b =>
+  b.addEventListener("click", () => choosePreset(b.dataset.preset)));
+
+/* 선택 화면에서 바로 파일 복원 */
+$("#inRestore").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const raw = await readJsonFile(f);
+  e.target.value = "";
+  if(!raw) return;
+  state.mode     = "local";
+  state.uid      = "local";
+  state.classId  = "local";
+  state.data     = emptyClassDoc("local");
+  if(await restoreBackup(raw)){
+    enterApp();
+    toast("이어서 사용합니다.");
+  }
+});
+
+(function boot(){
+  const m = location.hash.match(/^#\/s\/(.+)$/);
+  if(m){
+    state.mode = "cloud";
+    openStudentRoute(decodeURIComponent(m[1]));
+    return;
+  }
+
+  /* 주소로 직접 소개 페이지 열기 — 커뮤니티에 공유할 때 쓰는 주소 */
+  if(location.hash === "#/about"){ openIntro(); return; }
+
+  const hasSetup = loadSetup();
+
+  /* 처음 온 사람에게는 소개를 먼저 보여준다 (한 번만) */
+  if(!hasSetup && !LS.get(K_SEEN)){ openIntro(); return; }
+
+  if(!hasSetup){
+    showOnly("screen-setup");
+    return;
+  }
+
+  if(state.mode === "cloud"){
+    showOnly("screen-login");
+    if(!firebaseConfigured()){
+      $("#btnGoogle").disabled = true;
+      $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
+    }
+  }else{
+    startLocal();
+  }
+})();
+
+/* 끝 */
+</script>
+</body>
+</html>

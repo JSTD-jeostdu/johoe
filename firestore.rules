@@ -1,0 +1,69 @@
+rules_version = '2';
+
+// ============================================================
+// 아침 조회 도우미 (MCA) — Firestore 보안 규칙
+// 핵심 원칙
+//  1) 교사 데이터(classes, attendance)는 소유 교사만 접근한다.
+//  2) 학생 열람용(public)은 누구나 읽을 수 있으므로,
+//     애초에 이름·출결이 들어가지 않는 문서만 여기에 둔다.
+//  3) 반 비밀번호는 보안 장치가 아니다. 실제 보호는 이 규칙이 담당한다.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 로그인 여부
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // 해당 반의 소유 교사인지
+    function ownsClass(classId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/classes/$(classId))
+        && get(/databases/$(database)/documents/classes/$(classId)).data.ownerUid == request.auth.uid;
+    }
+
+    // ---------- 교사 전용: 반 문서 ----------
+    match /classes/{classId} {
+
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      // 생성 시 소유자를 본인으로 강제한다 (남의 반을 만들 수 없음)
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      // 수정 시 소유자 필드는 바꿀 수 없다
+      allow update: if signedIn()
+                    && resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // ---------- 교사 전용: 출결 ----------
+    // 문서 ID 형식: {classId}_{YYYY-MM-DD}
+    match /attendance/{docId} {
+
+      // docId 앞부분에서 classId 를 꺼낸다
+      function classIdOf() {
+        return docId.split('_')[0];
+      }
+
+      allow read, write: if ownsClass(classIdOf());
+    }
+
+    // ---------- 학생 열람용 ----------
+    // 익명 로그인 포함 누구나 읽을 수 있다.
+    // 따라서 이 문서에는 학생 이름·좌석·출결을 절대 넣지 않는다.
+    match /public/{classId} {
+      allow read: if true;
+      allow write: if ownsClass(classId);
+    }
+
+    // ---------- 그 외 전부 차단 ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
