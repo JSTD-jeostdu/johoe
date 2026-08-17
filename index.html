@@ -2233,16 +2233,12 @@ const K_ATT   = "mca_att_";       // + 날짜
 const store = (() => {
   let fb = null;   // { db, doc, setDoc, getDoc, deleteField }
 
-  /* "a.b.c" 형태의 경로를 중첩 객체로 바꿉니다 */
+  /* "a.b.c" 형태의 경로를 setDoc(merge:true) payload로 바꿉니다.
+     ★ 반드시 점(.) 표기 문자열을 최상위 키로 그대로 둘 것.
+     중첩 객체({a:{b:{c:value}}})로 만들면 merge:true가 그 필드
+     전체(a)를 통째로 덮어써 형제 필드가 사라진다(재발 이력 있음). */
   function nest(path, value){
-    const parts = path.split(".");
-    const root = {};
-    let cur = root;
-    parts.forEach((p, i) => {
-      if(i === parts.length - 1) cur[p] = value;
-      else { cur[p] = {}; cur = cur[p]; }
-    });
-    return root;
+    return { [path]: value };
   }
 
   /* 로컬 state.data 에도 동일하게 반영 */
