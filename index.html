@@ -91,6 +91,15 @@ button{ font-family:inherit; font-size:inherit; cursor:pointer; }
   font-family:var(--font-mono); font-size:12px;
   color:#B9C2D4; margin-left:auto;
 }
+/* 상태 점 — 저장 여부 (헤더) */
+.savebar{
+  display:flex; align-items:center; gap:5px;
+  font-size:11px; color:#B9C2D4;
+  font-family:var(--font-mono); flex:none;
+}
+.savebar .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-45); flex:none; }
+.savebar[data-s="synced"] .dot{ background:#5FAE9C; }
+.savebar[data-s="pending"] .dot{ background:var(--highlight); }
 
 /* ---------- 카드 ---------- */
 .card{
@@ -1290,6 +1299,9 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
     <div class="wrap">
       <h1 id="hdrTitle">관리</h1>
       <span class="cls" id="hdrClass">3학년 1반</span>
+      <span class="savebar hidden" id="saveBar" data-s="synced">
+        <span class="dot"></span><span id="saveBarTxt">저장됨</span>
+      </span>
     </div>
   </header>
 
@@ -2651,9 +2663,97 @@ function nextStudentId(){
 
 /* ============================================================
    5. 로그인
+   ------------------------------------------------------------
+   ★ 오프라인 저장(persistentLocalCache): 저장 요청을 서버로 보내기
+     전에 먼저 이 기기 디스크(IndexedDB)에 기록해 둔다. 그래서 전송이
+     끝나기 전에 페이지가 사라져도(미리보기 이동, 새로고침 등) 다음에
+     열었을 때 이어서 서버로 올라간다. 지원하지 않는 브라우저는 예전
+     방식으로 조용히 대체한다. (2026-08-19, 미리보기 이동 중 저장이
+     사라지던 문제 대응)
+   ★ 로그인 유지(onAuthStateChanged): 예전에는 새로고침할 때마다 무조건
+     로그인 화면부터 다시 떴다. 이미 로그인돼 있으면 팝업 없이 조용히
+     이어서 들어간다.
    ============================================================ */
 function firebaseConfigured(){
   return !!(CONFIG.firebase && CONFIG.firebase.apiKey && CONFIG.firebase.projectId);
+}
+
+let fbAuth  = null;   // 로그인 버튼과 자동 복원이 함께 씁니다
+let fbAuthMod = null;
+let fbRefs  = null;   // 저장 상태표(watchSaveStatus)에서 재사용
+
+/* Firebase 앱 · 인증 · DB를 한 번만 준비한다 */
+async function initFirebaseAuth(){
+  if(fbAuth) return;   // 이미 준비돼 있으면 다시 하지 않는다
+  const [{ initializeApp }, authMod, dbMod] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`)
+  ]);
+
+  const app  = initializeApp(CONFIG.firebase);
+  const auth = authMod.getAuth(app);
+
+  let db;
+  try{
+    db = dbMod.initializeFirestore(app, {
+      localCache: dbMod.persistentLocalCache({
+        tabManager: dbMod.persistentMultipleTabManager()   // PC·태블릿 동시 사용 대응
+      })
+    });
+  }catch(e){
+    console.warn("오프라인 저장을 켜지 못해 기본 방식으로 진행합니다.", e);
+    db = dbMod.getFirestore(app);
+  }
+
+  fbRefs = {
+    db,
+    doc: dbMod.doc,
+    setDoc: dbMod.setDoc,
+    getDoc: dbMod.getDoc,
+    deleteDoc: dbMod.deleteDoc,
+    deleteField: dbMod.deleteField,
+    onSnapshot: dbMod.onSnapshot
+  };
+  store.setFirebase(fbRefs);
+
+  fbAuth = auth;
+  fbAuthMod = authMod;
+}
+
+/* 팝업 로그인이든 자동 복원이든, 로그인된 사용자가 확보된 뒤 공통으로 할 일 */
+async function enterWithUser(user){
+  if(state.classId === user.uid) return;   // 이미 들어와 있으면 중복 실행 방지
+
+  state.mode     = "cloud";
+  state.uid      = user.uid;
+  state.classId  = user.uid;   // 교사 1명 = 반 1개
+
+  try{
+    let doc = await store.load();
+    if(!doc){
+      doc = emptyClassDoc(state.uid);
+      await store.create(doc);
+      toast("우리 반을 새로 만들었습니다.");
+    }
+    state.data = Object.assign(emptyClassDoc(state.uid), doc);
+    migrateDuty();
+  }catch(e){
+    console.error("데이터베이스 접근 실패", e);
+    showSetupError(e, "db");
+    return;
+  }
+
+  /* 이 기기에 열쇠를 기억해 둔 경우 자동으로 잠금을 푼다 */
+  if(state.data.nameVerify && await recallKey()){
+    try{
+      if(await crypt.dec(state.data.nameVerify) === VERIFY_TEXT) await decryptRoster();
+      else { crypt.key = null; forgetKey(); }
+    }catch(e){ crypt.key = null; forgetKey(); }
+  }
+
+  watchSaveStatus();
+  enterApp();
 }
 
 async function startWithGoogle(){
@@ -2664,68 +2764,87 @@ async function startWithGoogle(){
     return;
   }
   try{
-    const [{ initializeApp }, authMod, dbMod] = await Promise.all([
-      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
-      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`),
-      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`)
-    ]);
+    await initFirebaseAuth();
 
-    const app  = initializeApp(CONFIG.firebase);
-    const auth = authMod.getAuth(app);
-    const db   = dbMod.getFirestore(app);
-
-    // 학생 화면(Stage 3)에서 쓸 익명 로그인도 여기서 함께 준비해 둡니다.
-    // signInAnonymously 는 Stage 3에서 호출합니다.
-    store.setFirebase({
-      db,
-      doc: dbMod.doc,
-      setDoc: dbMod.setDoc,
-      getDoc: dbMod.getDoc,
-      deleteDoc: dbMod.deleteDoc,
-      deleteField: dbMod.deleteField
-    });
-
-    /* ---------- ① 인증 ---------- */
     let cred;
     try{
-      cred = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
+      cred = await fbAuthMod.signInWithPopup(fbAuth, new fbAuthMod.GoogleAuthProvider());
     }catch(e){
       console.error("로그인 실패", e);
       showSetupError(e, "auth");
       return;
     }
-
-    state.mode     = "cloud";
-    state.uid      = cred.user.uid;
-    state.classId  = cred.user.uid;   // 교사 1명 = 반 1개
-
-    /* ---------- ② 데이터베이스 ---------- */
-    try{
-      let doc = await store.load();
-      if(!doc){
-        doc = emptyClassDoc(state.uid);
-        await store.create(doc);
-        toast("우리 반을 새로 만들었습니다.");
-      }
-      state.data = Object.assign(emptyClassDoc(state.uid), doc);
-      migrateDuty();
-    }catch(e){
-      console.error("데이터베이스 접근 실패", e);
-      showSetupError(e, "db");
-      return;
-    }
-
-    /* 이 기기에 열쇠를 기억해 둔 경우 자동으로 잠금을 푼다 */
-    if(state.data.nameVerify && await recallKey()){
-      try{
-        if(await crypt.dec(state.data.nameVerify) === VERIFY_TEXT) await decryptRoster();
-        else { crypt.key = null; forgetKey(); }
-      }catch(e){ crypt.key = null; forgetKey(); }
-    }
-    enterApp();
+    await enterWithUser(cred.user);
   }catch(e){
     console.error("초기화 실패", e);
     showSetupError(e, "init");
+  }
+}
+
+/* 이미 로그인돼 있으면 팝업 없이 조용히 이어서 들어간다.
+   실패해도 로그인 화면(버튼)이 그대로 남아 있으니 따로 알리지 않는다. */
+async function tryResumeSession(){
+  if(!firebaseConfigured()) return;
+  try{
+    await initFirebaseAuth();
+    fbAuthMod.onAuthStateChanged(fbAuth, user => {
+      if(user && state.mode === "cloud") enterWithUser(user);
+    });
+  }catch(e){
+    console.warn("자동 로그인 확인 실패", e);
+  }
+}
+
+/* 로그인 화면을 띄우고, 설정이 돼 있으면 자동 복원을 시도한다.
+   (boot / goStart / choosePreset 세 곳에서 같이 쓰던 코드를 모았다) */
+function showLoginScreen(){
+  showOnly("screen-login");
+  if(!firebaseConfigured()){
+    $("#btnGoogle").disabled = true;
+    $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
+  }else{
+    tryResumeSession();
+  }
+}
+
+/* ---------- 저장 상태표 ----------
+   화면 우측 상단에 점 하나로 "저장됨 / 저장 중"을 보여준다.
+   Firestore의 실제 서버 동기화 여부(hasPendingWrites)를 기준으로 하므로
+   버튼을 눌렀는지가 아니라 진짜로 서버까지 도달했는지를 보여준다. */
+let saveUnsubs = [];
+function stopSaveWatch(){
+  saveUnsubs.forEach(u => { try{ u(); }catch(e){} });
+  saveUnsubs = [];
+}
+
+function watchSaveStatus(){
+  stopSaveWatch();
+  if(state.mode !== "cloud" || !fbRefs) return;
+  const bar = $("#saveBar");
+  if(!bar) return;
+  bar.classList.remove("hidden");
+
+  let pendingClass = false, pendingAtt = false;
+  const render = () => {
+    const pending = pendingClass || pendingAtt;
+    bar.dataset.s = pending ? "pending" : "synced";
+    $("#saveBarTxt").textContent = pending ? "저장 중" : "저장됨";
+  };
+
+  try{
+    const classRef = fbRefs.doc(fbRefs.db, "classes", state.classId);
+    saveUnsubs.push(fbRefs.onSnapshot(classRef, { includeMetadataChanges: true }, snap => {
+      pendingClass = snap.metadata.hasPendingWrites;
+      render();
+    }));
+
+    const attRef = fbRefs.doc(fbRefs.db, "attendance", `${state.classId}_${ymd(today())}`);
+    saveUnsubs.push(fbRefs.onSnapshot(attRef, { includeMetadataChanges: true }, snap => {
+      pendingAtt = snap.metadata.hasPendingWrites;
+      render();
+    }));
+  }catch(e){
+    console.warn("저장 상태 확인 실패", e);
   }
 }
 
@@ -5243,11 +5362,7 @@ function goStart(){
   document.body.style.paddingBottom = "";
   if(loadSetup()){
     if(state.mode === "cloud"){
-      showOnly("screen-login");
-      if(!firebaseConfigured()){
-        $("#btnGoogle").disabled = true;
-        $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
-      }
+      showLoginScreen();
     }else{
       startLocal();
     }
@@ -5279,11 +5394,7 @@ function choosePreset(name){
   saveSetup();
 
   if(state.mode === "cloud"){
-    showOnly("screen-login");
-    if(!firebaseConfigured()){
-      $("#btnGoogle").disabled = true;
-      $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
-    }
+    showLoginScreen();
   }else{
     startLocal();
   }
@@ -5331,11 +5442,7 @@ $("#inRestore").addEventListener("change", async e => {
   }
 
   if(state.mode === "cloud"){
-    showOnly("screen-login");
-    if(!firebaseConfigured()){
-      $("#btnGoogle").disabled = true;
-      $("#btnGoogle").textContent = "구글 로그인 (설정 필요)";
-    }
+    showLoginScreen();
   }else{
     startLocal();
   }
