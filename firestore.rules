@@ -4,7 +4,7 @@ rules_version = '2';
 // Johoe — Firestore 보안 규칙
 //
 // 핵심 원칙
-//  1) 교사 데이터(classes, attendance)는 소유 교사만 접근한다.
+//  1) 교사 데이터(classes, attendance, seatHistory)는 소유 교사만 접근한다.
 //  2) 학생 열람용(public)은 누구나 읽을 수 있으므로,
 //     애초에 이름·출결이 들어가지 않는 문서만 여기에 둔다.
 //  3) 반 비밀번호는 보안 장치가 아니다. 실제 보호는 이 규칙이 담당한다.
@@ -50,6 +50,18 @@ service cloud.firestore {
     match /attendance/{docId} {
 
       // docId 앞부분에서 classId 를 꺼낸다
+      function classIdOf() {
+        return docId.split('_')[0];
+      }
+
+      allow read, write: if isMine(classIdOf());
+    }
+
+    // ---------- 교사 전용: 자리 배치 이력 ----------
+    // 문서 ID 형식: {classId}_{YYYY-MM-DD}. attendance와 동일한 패턴이다.
+    // 이 문서는 saveSeatSnapshot() 한 곳에서만 쓰기 때문에 통째로 덮어써도 안전하다.
+    match /seatHistory/{docId} {
+
       function classIdOf() {
         return docId.split('_')[0];
       }

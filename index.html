@@ -101,6 +101,28 @@ button{ font-family:inherit; font-size:inherit; cursor:pointer; }
 .savebar[data-s="synced"] .dot{ background:#5FAE9C; }
 .savebar[data-s="pending"] .dot{ background:var(--highlight); }
 
+/* 날짜 탐색기 — 자리 배치·조회·출석 세 탭이 공유 */
+.datenav{ display:flex; align-items:center; gap:8px; margin:4px 0 10px; }
+.datenav button{
+  min-width:var(--tap); min-height:var(--tap); border:1px solid var(--line);
+  background:var(--card); border-radius:var(--r);
+  font-family:var(--font-mono); font-size:15px; color:var(--ink-70);
+}
+.datenav button:disabled{ opacity:.35; }
+.datenav .dn-label{
+  flex:1; text-align:center; font-size:13.5px; color:var(--ink);
+  font-family:var(--font-mono);
+}
+.datenav .dn-today{
+  flex:none; width:auto; padding:0 12px; font-size:12.5px;
+  color:var(--seal); border-color:var(--seal);
+}
+.histbar{
+  background:var(--highlight); color:var(--ink); font-size:12.5px;
+  text-align:center; padding:9px; border-radius:var(--r);
+  margin-bottom:12px; font-family:var(--font-mono);
+}
+
 /* ---------- 카드 ---------- */
 .card{
   background:var(--card);
@@ -1778,7 +1800,15 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
 
     <!-- ─────────── 탭 2: 자리 배치 ─────────── -->
     <section id="tab-seat" class="hidden">
-      <div class="card">
+      <div class="datenav" id="seatDateNav">
+        <button class="dn-prev" aria-label="어제">◀</button>
+        <span class="dn-label"></span>
+        <button class="dn-next" aria-label="내일">▶</button>
+        <button class="dn-today hidden">오늘로</button>
+      </div>
+      <div class="histbar hidden" id="seatHistBar">지난 기록을 보는 중입니다 (읽기 전용)</div>
+
+      <div class="card" id="seatEditCard">
         <span class="eyebrow">교실</span>
         <h2>자리 배치</h2>
         <p class="sub">오른쪽에서 학생을 고른 뒤, 앉힐 자리를 누르세요. 칠판은 화면 아래쪽입니다.</p>
@@ -1824,9 +1854,17 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
         <div class="sum" id="dashSum"></div>
       </div>
 
+      <div class="datenav" id="dashDateNav">
+        <button class="dn-prev" aria-label="어제">◀</button>
+        <span class="dn-label"></span>
+        <button class="dn-next" aria-label="내일">▶</button>
+        <button class="dn-today hidden">오늘로</button>
+      </div>
+      <div class="histbar hidden" id="dashHistBar">지난 기록을 보는 중입니다 (읽기 전용)</div>
+
       <!-- 오늘 시간표 -->
       <div class="card">
-        <span class="eyebrow">오늘 시간표</span>
+        <span class="eyebrow">시간표</span>
         <h2 id="ttHead">시간표</h2>
         <div class="periods" id="dashPeriods"></div>
         <details class="fold" id="ttOverride">
@@ -1845,7 +1883,7 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
       <!-- 조회 체크리스트 -->
       <div class="card">
         <span class="eyebrow">체크리스트</span>
-        <h2>오늘 말할 것</h2>
+        <h2>말할 것</h2>
         <div class="ck" id="ckList"></div>
         <div class="ckbar" id="ckBar"><span class="track"><span class="fill" id="ckFill"></span></span><span id="ckCount">0/0</span></div>
         <div style="display:flex; gap:8px; align-items:flex-end; margin-top:12px;">
@@ -1865,14 +1903,14 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
       <!-- 급식 -->
       <div class="card" id="cardMeal">
         <span class="eyebrow">급식</span>
-        <h2>오늘 급식</h2>
+        <h2>급식</h2>
         <div id="mealBody"></div>
       </div>
 
       <!-- 오늘 일정 -->
       <div class="card">
-        <span class="eyebrow">오늘 일정</span>
-        <h2>오늘 있는 일</h2>
+        <span class="eyebrow">일정</span>
+        <h2>있는 일</h2>
         <div class="items" id="dashToday"></div>
       </div>
 
@@ -1885,7 +1923,7 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
 
       <!-- 당번 -->
       <div class="card" id="cardDuty">
-        <span class="eyebrow">오늘 당번</span>
+        <span class="eyebrow">당번</span>
         <h2>당번 · 청소</h2>
         <div id="dashDuty"></div>
       </div>
@@ -1908,6 +1946,14 @@ details.fold .inner{ padding:0 13px 14px; border-top:1px solid var(--line); }
 
     <!-- ─────────── 탭 4: 출석 (Stage 2) ─────────── -->
     <section id="tab-attend" class="hidden">
+
+      <div class="datenav" id="attDateNav">
+        <button class="dn-prev" aria-label="어제">◀</button>
+        <span class="dn-label"></span>
+        <button class="dn-next" aria-label="내일">▶</button>
+        <button class="dn-today hidden">오늘로</button>
+      </div>
+      <div class="histbar hidden" id="attHistBar">지난 기록을 보는 중입니다 (읽기 전용)</div>
 
       <div class="card">
         <span class="eyebrow">출석부</span>
@@ -2162,6 +2208,9 @@ const state = {
   tab: "manage",
   attCache: {},        // { "2026-03-02": 출결문서 }
   attDate: null,       // 지금 보고 있는 출결 날짜
+  seatDate: null,       // null이면 오늘(수정 가능). 날짜 문자열이면 그 날의 기록을 보는 중(읽기 전용)
+  seatHistCache: {},    // { "2026-03-02": {seats, grid} | null }
+  dashDate: null,        // 조회 탭에서 null이면 오늘. 날짜 문자열이면 그 날을 보는 중(읽기 전용)
   publicCache: null,   // 둘러보기 모드에서 쓰는 학생 화면 문서
   names: {}            // { s01: "김정우" } 잠금 해제 중에만 메모리에 존재. 저장하지 않음
 };
@@ -2266,6 +2315,33 @@ const store = (() => {
     else cur[last] = value;
   }
 
+  /* ---------- 자리 배치 이력 ----------
+     seatHistory/{classId}_{date} — attendance와 동일한 문서 ID 패턴.
+     이 문서는 여기서만 쓰기 때문에 매번 통째로 덮어써도 안전하다(merge 아님). */
+  async function saveSeatSnapshot(){
+    if(!fb) return;
+    try{
+      const ds = ymd(today());
+      const ref = fb.doc(fb.db, "seatHistory", `${state.classId}_${ds}`);
+      await fb.setDoc(ref, {
+        classId: state.classId,
+        date: ds,
+        seats: state.data.seats || {},
+        grid: state.data.grid || null
+      });
+    }catch(e){
+      console.warn("자리 이력 저장 실패", e);   // 오늘의 실제 자리 배치는 이미 저장됐으므로 조용히 넘어간다
+    }
+  }
+
+  /* 자리를 연달아 여러 번 바꿀 때(격자 크기 조정 등) 매번 이력을 쓰지 않고
+     마지막 변경 이후 잠깐 기다렸다가 한 번만 기록한다 */
+  let seatSnapTimer = null;
+  function queueSeatSnapshot(){
+    clearTimeout(seatSnapTimer);
+    seatSnapTimer = setTimeout(saveSeatSnapshot, 800);
+  }
+
   return {
     setFirebase(o){ fb = o; },
 
@@ -2280,6 +2356,9 @@ const store = (() => {
           ? nest(path, fb.deleteField())
           : nest(path, value);
         await fb.setDoc(ref, payload, { merge: true });
+        if(path === "seats" || path.startsWith("seats.")){
+          queueSeatSnapshot();   // 자리 이력 — 연속 변경을 한 번으로 모아 곁다리로 기록
+        }
       }catch(e){
         console.error("저장 실패", e);
         toast("저장하지 못했습니다. 인터넷 연결을 확인해 주세요.");
@@ -2375,6 +2454,19 @@ const store = (() => {
       const ref  = fb.doc(fb.db, "public", classId);
       const snap = await fb.getDoc(ref);
       return snap.exists() ? snap.data() : null;
+    },
+
+    /* 특정 날짜의 자리 배치 스냅샷 — 없으면 null(그 날의 기록이 없다는 뜻) */
+    async loadSeatHistory(date){
+      if(state.mode !== "cloud" || !fb) return null;
+      try{
+        const ref  = fb.doc(fb.db, "seatHistory", `${state.classId}_${date}`);
+        const snap = await fb.getDoc(ref);
+        return snap.exists() ? snap.data() : null;
+      }catch(e){
+        console.error("자리 이력 불러오기 실패", e);
+        return null;
+      }
     }
   };
 })();
@@ -3132,7 +3224,44 @@ function studentById(id){
 }
 
 function renderSeats(justPlaced){
+  const ds = state.seatDate || ymd(today());
+  const viewingHistory = !!state.seatDate;
+  $("#seatEditCard").classList.toggle("hidden", viewingHistory);
+
+  /* 자리 이력은 서버 동기화(cloud) 모드에서만 기록된다.
+     다른 방식에서는 날짜 탐색기를 아예 숨겨 "항상 기록 없음"으로 보이는 걸 막는다. */
+  $("#seatDateNav").classList.toggle("hidden", state.mode !== "cloud");
+  $("#seatHistBar").classList.toggle("hidden", state.mode !== "cloud" || !viewingHistory);
+  if(state.mode !== "cloud" && viewingHistory){
+    state.seatDate = null;   // 방식이 바뀌었는데 과거 날짜를 보던 중이면 오늘로 되돌린다
+    return renderSeats(justPlaced);
+  }
+
+  if(viewingHistory){
+    const hist = state.seatHistCache[state.seatDate];
+    if(!hist){
+      $("#seatGrid").innerHTML = "";
+      $("#trayList").innerHTML = `<p class="sub">이 날은 자리를 바꾸지 않았습니다.<br>자리를 바꾼 날만 기록이 남습니다.</p>`;
+      renderDateNav("#seatDateNav", "#seatHistBar", ds);
+      return;
+    }
+    renderSeatGrid(hist.grid || CONFIG.seat, hist.seats || {}, true, justPlaced);
+    $("#trayList").innerHTML = "";
+    renderDateNav("#seatDateNav", "#seatHistBar", ds);
+    return;
+  }
+
   const { rows, cols } = state.data.grid || CONFIG.seat;
+  renderSeatGrid({ rows, cols }, state.data.seats || {}, false, justPlaced);
+  $("#inRows").value = rows;
+  $("#inCols").value = cols;
+  renderTray();
+  renderDateNav("#seatDateNav", "#seatHistBar", ds);
+}
+
+/* 자리표 격자 하나를 그린다. readonly면 버튼 대신 div로 그려 클릭이 먹지 않게 한다 */
+function renderSeatGrid(grid_, seatsSrc, readonly, justPlaced){
+  const { rows, cols } = grid_;
   const grid = $("#seatGrid");
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
@@ -3141,28 +3270,27 @@ function renderSeats(justPlaced){
   for(let r = rows - 1; r >= 0; r--){
     for(let c = 0; c < cols; c++){
       const key = seatKey(r, c);
-      const sid = (state.data.seats || {})[key];
+      const sid = seatsSrc[key];
       const s = sid ? studentById(sid) : null;
-      const picked = state.pickedStudent && s && s.id === state.pickedStudent;
-      const target = state.pickedStudent && !s;
+      const picked = !readonly && state.pickedStudent && s && s.id === state.pickedStudent;
+      const target = !readonly && state.pickedStudent && !s;
       const cls = [
         "seat",
         s ? "filled" : "empty",
         picked ? "picked" : "",
         target ? "target" : "",
-        justPlaced === key ? "placed" : ""
+        justPlaced === key ? "placed" : "",
+        readonly ? "readonly" : ""
       ].filter(Boolean).join(" ");
 
-      html += `<button class="${cls}" data-seat="${key}">` +
+      const tag  = readonly ? "div" : "button";
+      const attr = readonly ? "" : ` data-seat="${key}"`;
+      html += `<${tag} class="${cls}"${attr}>` +
               (s ? `<span class="sno">${s.no}</span><span class="snm">${escapeHtml(nameOf(s))}</span>` : "") +
-              `</button>`;
+              `</${tag}>`;
     }
   }
   grid.innerHTML = html;
-
-  $("#inRows").value = rows;
-  $("#inCols").value = cols;
-  renderTray();
 }
 
 function renderTray(){
@@ -3182,6 +3310,7 @@ function renderTray(){
 
 /* 자리를 눌렀을 때 */
 async function onSeatTap(key){
+  if(state.seatDate) return;   // 지난 기록을 보는 중에는 자리를 바꿀 수 없다(방어 코드, DOM에서도 이미 막혀 있음)
   const seats = state.data.seats || {};
   const sitting = seats[key];
 
@@ -3245,9 +3374,28 @@ function renderAll(){
     : "비우면 누구나 볼 수 있습니다";
 }
 
+/* 날짜 탐색기 공통 렌더 — 라벨·다음 버튼 비활성화·오늘로 버튼·안내 띠 */
+function renderDateNav(navSel, barSel, dateStr){
+  const nav = $(navSel);
+  if(!nav) return;
+  const isToday = dateStr === ymd(today());
+  const d = parseYmd(dateStr);
+  $(".dn-label", nav).textContent = isToday
+    ? "오늘"
+    : `${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_LABEL[d.getDay()]})`;
+  $(".dn-next", nav).disabled = isToday;
+  $(".dn-today", nav).classList.toggle("hidden", isToday);
+  if(barSel){
+    const bar = $(barSel);
+    if(bar) bar.classList.toggle("hidden", isToday);
+  }
+}
+
 function switchTab(tab){
   state.tab = tab;
   state.pickedStudent = null;
+  state.seatDate = null;    // 탭에 새로 들어올 때마다 오늘로 되돌린다
+  state.dashDate = null;
   ["manage","seat","home","attend"].forEach(t => {
     $("#tab-" + t).classList.toggle("hidden", t !== tab);
   });
@@ -3559,6 +3707,32 @@ $("#btnResetSeat").addEventListener("click", async () => {
   renderSeats();
 });
 
+/* 자리 배치 — 날짜 탐색기
+   ★ 빠르게 여러 번 눌렀을 때, 먼저 누른 게 나중에 응답이 와서 화면을 덮어쓰지 않도록
+   요청 번호로 "가장 최근 클릭"만 반영한다. */
+let seatDateReq = 0;
+async function setSeatDate(ds){
+  const myReq = ++seatDateReq;
+  const todayStr = ymd(today());
+  if(ds === todayStr){
+    state.seatDate = null;
+    renderSeats();
+    return;
+  }
+  if(!(ds in state.seatHistCache)){
+    state.seatHistCache[ds] = await store.loadSeatHistory(ds);
+  }
+  if(myReq !== seatDateReq) return;   // 기다리는 동안 더 최신 클릭이 있었다면 이 결과는 버린다
+  state.seatDate = ds;
+  renderSeats();
+}
+$("#seatDateNav").addEventListener("click", e => {
+  const ds = state.seatDate || ymd(today());
+  if(e.target.closest(".dn-prev")) setSeatDate(addDays(ds, -1));
+  else if(e.target.closest(".dn-next")) setSeatDate(addDays(ds, 1));
+  else if(e.target.closest(".dn-today")) setSeatDate(ymd(today()));
+});
+
 /* 자리 누르기 */
 $("#seatGrid").addEventListener("click", e => {
   const b = e.target.closest("[data-seat]");
@@ -3589,6 +3763,12 @@ function parseYmd(s){
 }
 function diffDays(a, b){
   return Math.round((b - a) / 86400000);
+}
+/* 날짜 문자열끼리 더하기/빼기 — 날짜 탐색기(◀▶)에서 사용 */
+function addDays(dateStr, delta){
+  const d = parseYmd(dateStr);
+  d.setDate(d.getDate() + delta);
+  return ymd(d);
 }
 function isWeekday(d){
   const w = d.getDay();
@@ -3905,8 +4085,9 @@ async function saveDutyField(patch){
    16. 조회 Dashboard
    ============================================================ */
 function renderDash(){
-  const d  = today();
-  const ds = ymd(d);
+  const ds = state.dashDate || ymd(today());
+  const viewingHistory = !!state.dashDate;
+  const d  = parseYmd(ds);
 
   $("#dashYmd").textContent = ds.replace(/-/g, ". ");
   $("#dashBig").innerHTML   = `${d.getMonth() + 1}월 ${d.getDate()}일 <em>${DAY_LABEL[d.getDay()]}요일</em>`;
@@ -3914,7 +4095,7 @@ function renderDash(){
   const n = (state.data.students || []).length;
   $("#dashSum").textContent = `${state.data.className || ""} · 학생 ${n}명`;
 
-  /* --- 오늘 시간표 --- */
+  /* --- 시간표 --- */
   const ps  = periodsFor(ds);
   const box = $("#dashPeriods");
   if(!isWeekday(d)){
@@ -3926,28 +4107,31 @@ function renderDash(){
         <span class="ps ${p.value ? "" : "none"}">${p.value ? escapeHtml(p.value) : "—"}</span>
       </div>`).join("");
   }
-  $("#ttHead").textContent = (state.data.overrides || {})[ds] ? "오늘 시간표 (변경됨)" : "오늘 시간표";
+  $("#ttHead").textContent = (state.data.overrides || {})[ds] ? "시간표 (변경됨)" : "시간표";
+  $("#ttOverride").classList.toggle("hidden", viewingHistory);
 
-  /* 오늘만 고치기 편집란 */
-  $("#ovEdit").innerHTML = ps.map((p, i) => `
-    <div class="period">
-      <span class="pn">${i + 1}</span>
-      <input type="text" data-ovp="${i}" data-one="1" value="${escapeHtml(p.value)}" autocomplete="off" style="min-height:40px;">
-    </div>`).join("");
+  /* 오늘만 고치기 편집란 — 과거 날짜에서는 만들지 않는다(저장 버튼이 항상 "오늘"에 쓰기 때문) */
+  if(!viewingHistory){
+    $("#ovEdit").innerHTML = ps.map((p, i) => `
+      <div class="period">
+        <span class="pn">${i + 1}</span>
+        <input type="text" data-ovp="${i}" data-one="1" value="${escapeHtml(p.value)}" autocomplete="off" style="min-height:40px;">
+      </div>`).join("");
+  }
 
-  /* --- 오늘 일정(반복) --- */
+  /* --- 일정(반복) --- */
   const recs = (state.data.recurring || []).filter(r => occursOn(r, d));
   const todayDd = sortedDdays().filter(x => x.date === ds);
   const tbox = $("#dashToday");
   if(!recs.length && !todayDd.length){
-    tbox.innerHTML = `<p class="sub">오늘 예정된 일정이 없습니다.</p>`;
+    tbox.innerHTML = `<p class="sub">예정된 일정이 없습니다.</p>`;
   }else{
     tbox.innerHTML =
       recs.map(r => `<div class="item"><span class="tag">${recLabel(r)}</span><span class="ttl">${escapeHtml(r.title)}</span></div>`).join("") +
       todayDd.map(x => `<div class="item"><span class="dd today">TODAY</span><span class="ttl">${escapeHtml(x.title)}</span></div>`).join("");
   }
 
-  /* --- 다가오는 D-Day (지난 것은 숨김, 최대 6개) --- */
+  /* --- 다가오는 D-Day (지난 것은 숨김, 최대 6개) — 항상 실제 오늘 기준 --- */
   const up = sortedDdays().filter(x => ddayNum(x.date) >= 0).slice(0, 6);
   $("#dashDday").innerHTML = up.length
     ? up.map(x => {
@@ -3966,7 +4150,7 @@ function renderDash(){
         <span class="v ${g.list.length ? "" : "none"}">${
           g.list.length ? g.list.map(st => escapeHtml(nameOf(st))).join(", ") : "없음"
         }</span></div>`).join("")
-    : `<p class="sub">${escapeHtml(dutyReason() || "오늘은 당번이 없습니다. (주말이거나 순환 시작 전입니다)")}</p>`;
+    : `<p class="sub">${escapeHtml(dutyReason() || "당번이 없습니다. (주말이거나 순환 시작 전입니다)")}</p>`;
 
   /* --- 체크리스트 / 급식 --- */
   renderChecklist();
@@ -3976,6 +4160,15 @@ function renderDash(){
   $("#taNotice").value = state.data.notice || "";
   $("#taSupply").value = state.data.supplies || "";
   $("#taMemo").value   = (state.data.memos || {})[ds] || "";
+  $("#taNotice").disabled     = viewingHistory;
+  $("#taSupply").disabled     = viewingHistory;
+  $("#taMemo").disabled       = viewingHistory;
+  $("#btnSaveNotes").disabled = viewingHistory;
+  $("#inCkNew").disabled      = viewingHistory;
+  $("#btnCkAdd").disabled     = viewingHistory;
+  $("#chkCkPin").disabled     = viewingHistory;
+
+  renderDateNav("#dashDateNav", "#dashHistBar", ds);
 }
 
 /* ============================================================
@@ -3984,26 +4177,37 @@ function renderDash(){
    · 반복 항목(checklist)은 매일 아침 자동으로 다시 올라온다.
    · 오늘만 쓰는 항목과 체크 상태는 날짜별로 따로 둔다.
    ============================================================ */
-function ckToday(){
-  const ds = ymd(today());
-  const d  = (state.data.checkDaily || {})[ds] || {};
+/* 날짜를 받아 그날의 체크리스트 상태를 돌려준다 */
+function ckForDate(ds){
+  const d = (state.data.checkDaily || {})[ds] || {};
   return { ds, items: d.items || [], done: d.done || {} };
 }
+/* 항목 추가·체크·삭제는 항상 "진짜 오늘"을 기준으로 한다(과거 날짜는 읽기 전용) */
+function ckToday(){
+  return ckForDate(ymd(today()));
+}
+/* 화면 표시는 지금 보고 있는 날짜(state.dashDate, 없으면 오늘) 기준이다 */
+function ckViewing(){
+  return ckForDate(state.dashDate || ymd(today()));
+}
 
-/* 반복 항목 + 오늘 항목을 합쳐 실제로 보여줄 목록을 만든다 */
+/* 반복 항목 + 그날 항목을 합쳐 실제로 보여줄 목록을 만든다 */
 function ckAll(){
-  const { items } = ckToday();
+  const { items } = ckViewing();
   const pinned = (state.data.checklist || []).map(x => ({ ...x, pin: true }));
   return [...pinned, ...items.map(x => ({ ...x, pin: false }))];
 }
 
 function renderChecklist(){
-  const { done } = ckToday();
+  const { done } = ckViewing();
   const list = ckAll();
+  const viewingHistory = !!state.dashDate;
   const box = $("#ckList");
 
   if(!list.length){
-    box.innerHTML = `<p class="sub">오늘 말할 것을 적어 두면 조회 중에 하나씩 지울 수 있습니다.</p>`;
+    box.innerHTML = viewingHistory
+      ? `<p class="sub">이 날은 적어 둔 항목이 없습니다.</p>`
+      : `<p class="sub">오늘 말할 것을 적어 두면 조회 중에 하나씩 지울 수 있습니다.</p>`;
     $("#ckBar").classList.add("hidden");
     return;
   }
@@ -4011,10 +4215,10 @@ function renderChecklist(){
 
   box.innerHTML = list.map(x => `
     <label class="ckrow" data-done="${done[x.id] ? 1 : 0}">
-      <input type="checkbox" data-ck="${x.id}" ${done[x.id] ? "checked" : ""}>
+      <input type="checkbox" data-ck="${x.id}" ${done[x.id] ? "checked" : ""} ${viewingHistory ? "disabled" : ""}>
       <span class="t">${escapeHtml(x.text)}</span>
       ${x.pin ? `<span class="pin">매일</span>` : ""}
-      <button class="x" data-ckdel="${x.id}|${x.pin ? 1 : 0}" aria-label="삭제">×</button>
+      ${viewingHistory ? "" : `<button class="x" data-ckdel="${x.id}|${x.pin ? 1 : 0}" aria-label="삭제">×</button>`}
     </label>`).join("");
 
   const n = list.filter(x => done[x.id]).length;
@@ -4022,7 +4226,7 @@ function renderChecklist(){
   $("#ckFill").style.width = list.length ? `${Math.round(n / list.length * 100)}%` : "0";
 
   if(n === list.length){
-    box.insertAdjacentHTML("beforeend", `<div class="ckdone">오늘 말할 것을 다 전했습니다.</div>`);
+    box.insertAdjacentHTML("beforeend", `<div class="ckdone">${viewingHistory ? "이 날은 전부 전했습니다." : "오늘 말할 것을 다 전했습니다."}</div>`);
   }
 }
 
@@ -4141,6 +4345,7 @@ function mealHtml(meal){
 }
 
 /* 조회 화면 */
+let mealReq = 0;
 async function renderMeal(){
   const sc = state.data.school;
   const card = $("#cardMeal");
@@ -4149,9 +4354,12 @@ async function renderMeal(){
     $("#mealBody").innerHTML = `<p class="sub">관리 화면에서 학교를 고르면 급식이 매일 저절로 뜹니다.</p>`;
     return;
   }
+  const myReq = ++mealReq;
   card.classList.remove("hidden");
   $("#mealBody").innerHTML = `<p class="sub">불러오는 중…</p>`;
-  const meal = await fetchMeal(sc, ymd(today()));
+  const ds = state.dashDate || ymd(today());
+  const meal = await fetchMeal(sc, ds);
+  if(myReq !== mealReq) return;   // 기다리는 동안 더 최신 날짜 클릭이 있었다면 이 결과는 버린다
   $("#mealBody").innerHTML = mealHtml(meal);
 }
 
@@ -4170,20 +4378,24 @@ function attStatus(id){
   return (doc && doc.students && doc.students[id]) ? doc.students[id].status : "ok";
 }
 
-async function openAttendance(){
-  state.attDate = ymd(today());
+async function openAttendance(dateStr){
+  state.attDate = dateStr || ymd(today());
   await store.loadAtt(state.attDate);
   renderAtt();
 }
 
 function renderAtt(){
   const ds  = state.attDate;
+  const viewingHistory = ds !== ymd(today());
   const doc = state.attCache[ds] || { students:{}, closed:false };
   const students = state.data.students || [];
 
   $("#attHead").textContent = `${ds.slice(5).replace("-", "월 ")}일 출석`;
 
-  /* 좌석이 배치되어 있으면 좌석표 그대로, 아니면 번호순 격자 */
+  /* 좌석이 배치되어 있으면 좌석표 그대로, 아니면 번호순 격자
+     (참고: 여기서는 항상 "지금" 자리 배치를 보여준다. 그날의 자리 배치를 그대로
+     재현하지는 않는다 — 누가 결석·지각했는지 확인하는 용도라 정확한 좌석 위치보다
+     학생 목록이 더 중요하다고 보고 범위를 좁혔다.) */
   const { rows, cols } = state.data.grid || CONFIG.seat;
   const seats = state.data.seats || {};
   const seated = Object.keys(seats).length > 0;
@@ -4196,12 +4408,12 @@ function renderAtt(){
       for(let c = 0; c < cols; c++){
         const sid = seats[seatKey(r, c)];
         const s = sid ? studentById(sid) : null;
-        html += s ? attCell(s) : `<div class="seat empty readonly"></div>`;
+        html += s ? attCell(s, viewingHistory) : `<div class="seat empty readonly"></div>`;
       }
     }
     $("#attNoSeat").textContent = "";
   }else{
-    html = students.map(attCell).join("");
+    html = students.map(s => attCell(s, viewingHistory)).join("");
     $("#attNoSeat").textContent = students.length
       ? "자리 배치를 하면 실제 교실 모양대로 볼 수 있습니다."
       : "먼저 관리 화면에서 학생 명단을 등록해 주세요.";
@@ -4219,25 +4431,29 @@ function renderAtt(){
   $("#tallyAb").textContent = ab;
   $("#tallyLt").textContent = lt;
 
-  /* 조회 종료 상태 */
-  $("#btnCloseMeeting").classList.toggle("hidden", !!doc.closed);
-  $("#btnReopen").classList.toggle("hidden", !doc.closed);
+  /* 조회 종료 상태 — 과거 날짜에서는 두 버튼 모두 숨긴다(읽기 전용) */
+  $("#btnCloseMeeting").classList.toggle("hidden", viewingHistory || !!doc.closed);
+  $("#btnReopen").classList.toggle("hidden", viewingHistory || !doc.closed);
   renderFollow(doc);
+  renderDateNav("#attDateNav", "#attHistBar", ds);
 }
 
-function attCell(s){
+function attCell(s, readonly){
   const st  = attStatus(s.id);
   const cls = st === "absent" ? "absent" : st === "late" ? "late" : "filled";
   const mk  = st === "absent" ? "결" : st === "late" ? "지" : "";
-  return `<button class="seat ${cls}" data-att="${s.id}">
+  const tag  = readonly ? "div" : "button";
+  const attr = readonly ? "" : ` data-att="${s.id}"`;
+  return `<${tag} class="seat ${cls}${readonly ? " readonly" : ""}"${attr}>
     ${mk ? `<span class="mark">${mk}</span>` : ""}
     <span class="sno">${s.no}</span>
     <span class="snm">${escapeHtml(nameOf(s))}</span>
-  </button>`;
+  </${tag}>`;
 }
 
 /* 출석 → 결석 → 지각 → 출석 */
 async function cycleAtt(id){
+  if(state.attDate !== ymd(today())) return;   // 지난 기록을 보는 중에는 출석을 바꿀 수 없다(방어 코드, DOM에서도 이미 막혀 있음)
   const cur  = attStatus(id);
   const next = cur === "ok" ? "late" : cur === "late" ? "absent" : "ok";
   if(next === "ok"){
@@ -4324,6 +4540,18 @@ $("#btnApplyPeriods").addEventListener("click", async () => {
   toast("교시 수를 바꿨습니다. 시간표를 확인하고 저장해 주세요.");
 });
 $("#btnSaveTT").addEventListener("click", saveTimetable);
+
+/* 조회 탭 — 날짜 탐색기 */
+function setDashDate(ds){
+  state.dashDate = (ds === ymd(today())) ? null : ds;
+  renderDash();
+}
+$("#dashDateNav").addEventListener("click", e => {
+  const ds = state.dashDate || ymd(today());
+  if(e.target.closest(".dn-prev")) setDashDate(addDays(ds, -1));
+  else if(e.target.closest(".dn-next")) setDashDate(addDays(ds, 1));
+  else if(e.target.closest(".dn-today")) setDashDate(ymd(today()));
+});
 
 /* 오늘만 시간표 고치기 */
 $("#btnSaveOv").addEventListener("click", async () => {
@@ -4535,6 +4763,14 @@ $("#btnSaveNotes").addEventListener("click", async () => {
 });
 
 /* --- 출석 --- */
+/* 출석 탭 — 날짜 탐색기 */
+$("#attDateNav").addEventListener("click", e => {
+  const ds = state.attDate;
+  if(e.target.closest(".dn-prev")) openAttendance(addDays(ds, -1));
+  else if(e.target.closest(".dn-next")) openAttendance(addDays(ds, 1));
+  else if(e.target.closest(".dn-today")) openAttendance(ymd(today()));
+});
+
 $("#attGrid").addEventListener("click", e => {
   const b = e.target.closest("[data-att]");
   if(b) cycleAtt(b.dataset.att);
