@@ -2290,6 +2290,7 @@ const LS = {
 const K_SETUP = "mca_setup";      // { mode, nameMode }
 const K_CLASS = "mca_class";      // 반 문서
 const K_ATT   = "mca_att_";       // + 날짜
+const K_SEAT  = "mca_seat_";      // + 날짜. 그날의 자리 배치 이력
 
 const store = (() => {
   let fb = null;   // { db, doc, setDoc, getDoc, deleteField }
@@ -2368,19 +2369,22 @@ const store = (() => {
   }
 
   /* ---------- 자리 배치 이력 ----------
-     seatHistory/{classId}_{date} — attendance와 동일한 문서 ID 패턴.
-     이 문서는 여기서만 쓰기 때문에 매번 통째로 덮어써도 안전하다(merge 아님). */
+     클라우드: seatHistory/{classId}_{date} — attendance와 동일한 문서 ID 패턴.
+     기기 저장: mca_seat_{date} — 출결(mca_att_)과 같은 방식.
+     어느 쪽이든 여기서만 쓰기 때문에 매번 통째로 덮어써도 안전하다(merge 아님). */
   function saveSeatSnapshot(){
-    if(!fb) return;
-    const ds = ymd(today());
-    const ref = fb.doc(fb.db, "seatHistory", `${state.classId}_${ds}`);
-    /* 여기서도 서버 응답을 기다리지 않는다 — 기다리면 오프라인일 때 이력이 아예 남지 않는다 */
-    fb.setDoc(ref, {
+    const ds   = ymd(today());
+    const snap = {
       classId: state.classId,
       date: ds,
       seats: state.data.seats || {},
       grid: state.data.grid || null
-    }).catch(e => {
+    };
+    if(state.mode === "local"){ LS.set(K_SEAT + ds, snap); return; }
+    if(state.mode !== "cloud" || !fb) return;
+    const ref = fb.doc(fb.db, "seatHistory", `${state.classId}_${ds}`);
+    /* 여기서도 서버 응답을 기다리지 않는다 — 기다리면 오프라인일 때 이력이 아예 남지 않는다 */
+    fb.setDoc(ref, snap).catch(e => {
       console.warn("자리 이력 저장 실패", e);   // 오늘의 실제 자리 배치는 이미 저장됐으므로 조용히 넘어간다
     });
   }
@@ -2399,6 +2403,11 @@ const store = (() => {
     /* 필드 하나(또는 하위 트리) 저장 */
     async save(path, value){
       applyLocal(path, value);
+      /* 자리 이력 — 연속 변경을 한 번으로 모아 곁다리로 기록한다.
+         저장 위치와 상관없이 남겨야 하므로 아래 갈림길보다 먼저 부른다. */
+      if(path === "seats" || path.startsWith("seats.")){
+        queueSeatSnapshot();
+      }
       if(state.mode === "local"){ LS.set(K_CLASS, state.data); return; }
       if(state.mode !== "cloud" || !fb) return;
       const ref = fb.doc(fb.db, "classes", state.classId);
@@ -2408,9 +2417,6 @@ const store = (() => {
         { ownerUid: state.uid },
         () => toast("저장하지 못했습니다. 인터넷 연결을 확인해 주세요.")
       );
-      if(path === "seats" || path.startsWith("seats.")){
-        queueSeatSnapshot();   // 자리 이력 — 연속 변경을 한 번으로 모아 곁다리로 기록
-      }
     },
 
     /* 문서 처음 만들 때만 사용 */
@@ -2534,6 +2540,7 @@ const store = (() => {
 
     /* 특정 날짜의 자리 배치 스냅샷 — 없으면 null(그 날의 기록이 없다는 뜻) */
     async loadSeatHistory(date){
+      if(state.mode === "local") return LS.get(K_SEAT + date);
       if(state.mode !== "cloud" || !fb) return null;
       try{
         const ref  = fb.doc(fb.db, "seatHistory", `${state.classId}_${date}`);
@@ -2849,6 +2856,7 @@ function firebaseConfigured(){
 let fbAuth  = null;   // 로그인 버튼과 자동 복원이 함께 씁니다
 let fbAuthMod = null;
 let fbRefs  = null;   // 저장 상태표(watchSaveStatus)에서 재사용
+let authUnsub = null; // 로그인 상태 구독. 화면을 오갈 때마다 쌓이지 않게 하나만 유지합니다
 
 /* Firebase 앱 · 인증 · DB를 한 번만 준비한다 */
 async function initFirebaseAuth(){
@@ -2956,7 +2964,10 @@ async function tryResumeSession(){
   if(!firebaseConfigured()) return;
   try{
     await initFirebaseAuth();
-    fbAuthMod.onAuthStateChanged(fbAuth, user => {
+    /* 로그인 화면은 boot / goStart / choosePreset 세 곳에서 다시 뜬다.
+       그때마다 새로 구독하면 리스너가 쌓이므로 이전 것을 먼저 끊는다. */
+    if(authUnsub){ try{ authUnsub(); }catch(e){} }
+    authUnsub = fbAuthMod.onAuthStateChanged(fbAuth, user => {
       if(user && state.mode === "cloud") enterWithUser(user);
     });
   }catch(e){
@@ -2980,10 +2991,15 @@ function showLoginScreen(){
    화면 우측 상단에 점 하나로 "저장됨 / 저장 중"을 보여준다.
    Firestore의 실제 서버 동기화 여부(hasPendingWrites)를 기준으로 하므로
    버튼을 눌렀는지가 아니라 진짜로 서버까지 도달했는지를 보여준다. */
-let saveUnsubs = [];
+let saveUnsubs   = [];
+let saveAttDate  = null;   // 지금 감시 중인 출결 날짜
+let saveDayTimer = null;
 function stopSaveWatch(){
   saveUnsubs.forEach(u => { try{ u(); }catch(e){} });
   saveUnsubs = [];
+  clearInterval(saveDayTimer);
+  saveDayTimer = null;
+  saveAttDate  = null;
 }
 
 function watchSaveStatus(){
@@ -3000,6 +3016,31 @@ function watchSaveStatus(){
     $("#saveBarTxt").textContent = pending ? "저장 중" : "저장됨";
   };
 
+  /* 출결은 날짜마다 문서가 다르다.
+     앱을 켜 둔 채 자정을 넘기면 어제 문서를 계속 감시하게 되어,
+     오늘 출결을 만져도 "저장 중"이 뜨지 않는다.
+     그래서 날짜가 바뀌면 감시 대상을 갈아 끼운다. */
+  let attUnsub = null;
+  const watchAtt = () => {
+    const ds = ymd(today());
+    if(ds === saveAttDate) return;
+    saveAttDate = ds;
+
+    if(attUnsub){
+      try{ attUnsub(); }catch(e){}
+      saveUnsubs = saveUnsubs.filter(u => u !== attUnsub);
+    }
+    pendingAtt = false;
+
+    const attRef = fbRefs.doc(fbRefs.db, "attendance", `${state.classId}_${ds}`);
+    attUnsub = fbRefs.onSnapshot(attRef, { includeMetadataChanges: true }, snap => {
+      pendingAtt = snap.metadata.hasPendingWrites;
+      render();
+    });
+    saveUnsubs.push(attUnsub);
+    render();
+  };
+
   try{
     const classRef = fbRefs.doc(fbRefs.db, "classes", state.classId);
     saveUnsubs.push(fbRefs.onSnapshot(classRef, { includeMetadataChanges: true }, snap => {
@@ -3007,11 +3048,13 @@ function watchSaveStatus(){
       render();
     }));
 
-    const attRef = fbRefs.doc(fbRefs.db, "attendance", `${state.classId}_${ymd(today())}`);
-    saveUnsubs.push(fbRefs.onSnapshot(attRef, { includeMetadataChanges: true }, snap => {
-      pendingAtt = snap.metadata.hasPendingWrites;
-      render();
-    }));
+    watchAtt();
+    saveDayTimer = setInterval(watchAtt, 60000);   // 자정을 넘겼는지 1분마다 확인
+
+    /* 태블릿을 덮어 뒀다가 다음 날 아침에 여는 경우 — 타이머보다 이쪽이 빠르다 */
+    const onWake = () => { if(!document.hidden) watchAtt(); };
+    document.addEventListener("visibilitychange", onWake);
+    saveUnsubs.push(() => document.removeEventListener("visibilitychange", onWake));
   }catch(e){
     console.warn("저장 상태 확인 실패", e);
   }
@@ -5029,6 +5072,10 @@ async function switchBackend(next){
     });
     if(!ok){ renderModePanel(); return; }
     state.mode = "local";
+    /* 서버 저장 상태표는 더 이상 이 기기의 저장을 뜻하지 않는다. 감시를 끊고 내린다. */
+    stopSaveWatch();
+    const bar = $("#saveBar");
+    if(bar) bar.classList.add("hidden");
     LS.set(K_CLASS, state.data);
     Object.keys(state.attCache).forEach(d => LS.set(K_ATT + d, state.attCache[d]));
     saveSetup();
